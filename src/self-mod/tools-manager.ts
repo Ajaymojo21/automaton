@@ -10,6 +10,7 @@ import type {
   InstalledTool,
 } from "../types.js";
 import { logModification } from "./audit-log.js";
+import { isValidPackageName } from "../agent/policy-rules/validation.js";
 import { ulid } from "ulid";
 
 /**
@@ -20,8 +21,9 @@ export async function installNpmPackage(
   db: AutomatonDatabase,
   packageName: string,
 ): Promise<{ success: boolean; error?: string }> {
-  // Sanitize package name (prevent command injection)
-  if (!/^[@a-zA-Z0-9._/-]+$/.test(packageName)) {
+  // Same validator the policy rule and the tool bodies use: a name beginning with
+  // `-` would otherwise reach npm as a flag instead of a package.
+  if (!isValidPackageName(packageName)) {
     return {
       success: false,
       error: `Invalid package name: ${packageName}`,

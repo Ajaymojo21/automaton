@@ -7,7 +7,27 @@
 
 import type { PolicyRule, PolicyRequest, PolicyRuleResult } from "../../types.js";
 
-const PACKAGE_NAME_RE = /^[@a-zA-Z0-9._/-]+$/;
+/**
+ * npm package names are `name` or `@scope/name`, and neither segment may begin with
+ * `-` or `.`. The leading-character rule is the security-relevant part: the value is
+ * interpolated into `npm install -g <value>`, so a leading `-` makes npm read it as a
+ * *switch* rather than a package.
+ *
+ * Measured against npm 10.9.9 on this host (2026-11-01, since reverted): shell
+ * metacharacters, spaces and `=` were already rejected, so value-bearing switches such
+ * as `--userconfig=/path` were never reachable. What was reachable is a leading-dash
+ * value that npm's parser consumes as switches, leaving no positional package — npm then
+ * installs the *current working directory*. `npm install -g -forgery` linked the whole
+ * Conway project into the pinned Node runtime. Unknown switches are not rejected either.
+ * The consequence is not code execution, but it is enough to install the wrong target.
+ */
+const PACKAGE_NAME_RE = /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export { PACKAGE_NAME_RE };
+
+export function isValidPackageName(value: string): boolean {
+  return PACKAGE_NAME_RE.test(value);
+}
+
 const SKILL_NAME_RE = /^[a-zA-Z0-9-]+$/;
 const GIT_HASH_RE = /^[a-f0-9]{7,40}$/;
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -33,7 +53,7 @@ function createPackageNameRule(): PolicyRule {
       const pkg = request.args.package as string | undefined;
       if (pkg === undefined) return null;
 
-      if (!PACKAGE_NAME_RE.test(pkg)) {
+      if (!isValidPackageName(pkg)) {
         return deny(
           "validate.package_name",
           "VALIDATION_FAILED",

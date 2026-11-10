@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+@theme {
+  --color-abyss: #060b16;
+  --color-deep: #0a1120;
+  --color-panel: #0e1728;
+  --color-panel-2: #131f34;
+  --color-edge: #1d2b44;
+  --color-edge-soft: #16223a;
+  --color-mist: #8fa3c4;
+  --color-frost: #dbe7fb;
+  --color-beam: #38bdf8;
+  --color-violet: #818cf8;
+  --color-verdant: #34d399;
+  --color-amber: #fbbf24;
+  --color-crimson: #f87171;
+  --font-display: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 12% -10%, #14243f 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #131c34 0%, transparent 55%),
+      var(--color-abyss);
+    color: var(--color-frost);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv02", "cv03", "tnum";
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-beam) 35%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-edge);
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-beam);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .shell-grid {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    height: 100vh;
+  }
+
+  .card {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--color-panel) 92%, #fff 2%), var(--color-deep));
+    border: 1px solid var(--color-edge-soft);
+    border-radius: 14px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  }
+
+  .eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-mist);
+    font-weight: 600;
+  }
+
+  .value {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-frost);
+    overflow-wrap: anywhere;
+  }
+
+  .note {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--color-mist);
+  }
+
+  .table-head {
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-mist);
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-edge);
+    white-space: nowrap;
+  }
+
+  .table-cell {
+    padding: 9px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--color-edge-soft);
+    vertical-align: top;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--color-mist);
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-align: left;
+    background: none;
+  }
+
+  .nav-item:hover {
+    background: var(--color-panel);
+    color: var(--color-frost);
+  }
+
+  .nav-item[aria-current="page"] {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-beam) 16%, transparent), transparent);
+    border-color: color-mix(in srgb, var(--color-beam) 30%, transparent);
+    color: #eaf3ff;
+  }
+
+  .btn {
+    padding: 8px 14px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    border: 1px solid var(--color-edge);
+    background: var(--color-panel-2);
+    color: var(--color-frost);
+    cursor: pointer;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    border-color: color-mix(in srgb, var(--color-beam) 45%, transparent);
+    background: color-mix(in srgb, var(--color-beam) 18%, var(--color-panel-2));
+  }
+
+  .input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--color-edge);
+    background: var(--color-deep);
+    color: var(--color-frost);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+}

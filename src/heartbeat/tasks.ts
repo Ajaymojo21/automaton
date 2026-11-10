@@ -146,6 +146,14 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
   },
 
   check_usdc_balance: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    // Lockdown: never buy credits automatically unless financial tools are enabled.
+    if (
+      taskCtx.config.security?.lockdown === true &&
+      taskCtx.config.security?.allowFinancialTools !== true
+    ) {
+      return { shouldWake: false };
+    }
+
     // Use ctx.usdcBalance instead of calling getUsdcBalance()
     const balance = ctx.usdcBalance;
     const credits = ctx.creditBalance;
@@ -168,8 +176,9 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
 
       taskCtx.db.setKV("last_auto_topup_attempt", new Date().toISOString());
 
-      const { bootstrapTopup } = await import("../conway/topup.js");
-      const result = await bootstrapTopup({
+      const topup =
+        taskCtx.topup ?? (await import("../conway/topup.js")).bootstrapTopup;
+      const result = await topup({
         apiUrl: taskCtx.config.conwayApiUrl,
         account: taskCtx.identity.account,
         creditsCents: credits,
@@ -701,6 +710,91 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
       return { shouldWake: false };
     } catch (error) {
       logger.error("dead_agent_cleanup failed", error instanceof Error ? error : undefined);
+      return { shouldWake: false };
+    }
+  },
+
+  health_guardian: async (_ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    try {
+      const { runHealthChecks } = await import("../reliability/health-guardian.js");
+      const { runMechanic } = await import("../reliability/mechanic.js");
+
+      const report = runHealthChecks({
+        db: taskCtx.db.raw,
+        config: taskCtx.config,
+      });
+      const outcome = runMechanic(report, {
+        db: taskCtx.db.raw,
+        config: taskCtx.config,
+      });
+
+      taskCtx.db.setKV(
+        "last_health_report",
+        JSON.stringify({ report, outcome, recordedAt: new Date().toISOString() }),
+      );
+
+      const escalations = report.checks.filter(
+        (check) => check.status === "fail" || check.status === "requires_operator",
+      );
+      if (escalations.length > 0) {
+        return {
+          shouldWake: true,
+          message: `Health ${report.overall}: ${escalations
+            .map((check) => check.id)
+            .join(", ")}`,
+        };
+      }
+      return { shouldWake: false };
+    } catch (error) {
+      logger.error("health_guardian failed", error instanceof Error ? error : undefined);
+      return { shouldWake: false };
+    }
+  },
+
+  security_monitor: async (_ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    try {
+      const { checkTamper, incidentSummary, scanSecurityEvents } = await import(
+        "../security/incidents.js"
+      );
+
+      const raised = scanSecurityEvents(taskCtx.db.raw);
+      const tamper = checkTamper(taskCtx.db.raw);
+      const summary = incidentSummary(taskCtx.db.raw);
+      taskCtx.db.setKV(
+        "last_security_scan",
+        JSON.stringify({
+          scannedAt: new Date().toISOString(),
+          raised: raised.map((incident) => incident.incidentType),
+          tamper: tamper.incident?.incidentType ?? null,
+          open: summary.open,
+          bySeverity: summary.bySeverity,
+          chainValid: tamper.chainValid && tamper.sealsValid,
+        }),
+      );
+
+      if (tamper.recommendEmergencyStop) {
+        // Monitoring reports the failure; engaging the stop stays a human
+        // decision because it halts all autonomous activity.
+        return {
+          shouldWake: true,
+          message: `Audit integrity failure — emergency stop recommended: ${tamper.reason ?? "unknown"}`,
+        };
+      }
+
+      const severe = raised.filter(
+        (incident) => incident.severity === "CRITICAL" || incident.severity === "HIGH",
+      );
+      if (severe.length > 0) {
+        return {
+          shouldWake: true,
+          message: `${severe.length} high-severity incident(s): ${severe
+            .map((incident) => incident.incidentType)
+            .join(", ")}`,
+        };
+      }
+      return { shouldWake: false };
+    } catch (error) {
+      logger.error("security_monitor failed", error instanceof Error ? error : undefined);
       return { shouldWake: false };
     }
   },

@@ -68,6 +68,8 @@ export interface AutomatonConfig {
   parentAddress?: string;
   socialRelayUrl?: string;
   treasuryPolicy?: TreasuryPolicy;
+  /** Supervised activation and lockdown controls. Merged with defaults on load. */
+  security?: SecurityConfig;
   // Phase 2 config additions
   soulConfig?: SoulConfig;
   modelStrategy?: ModelStrategyConfig;
@@ -518,6 +520,8 @@ export interface PolicyRequest {
     inputSource: InputSource | undefined;
     turnToolCallCount: number;
     sessionSpend: SpendTrackerInterface;
+    /** Phase 15: turn identifier used to detect duplicate submissions. */
+    turnId?: string;
   };
 }
 
@@ -578,6 +582,12 @@ export interface TreasuryPolicy {
   maxTransfersPerTurn: number;
   maxInferenceDailyCents: number;
   requireConfirmationAboveCents: number;
+  /** Phase 15: calendar-month transfer cap. Absent or 0 denies all transfers. */
+  maxMonthlyTransferCents?: number;
+  /** Phase 15: lifetime spend cap for this agent across all financial categories. */
+  agentBudgetCents?: number;
+  /** Phase 15: lifetime spend cap for any single child agent. */
+  childBudgetCents?: number;
 }
 
 export const DEFAULT_TREASURY_POLICY: TreasuryPolicy = {
@@ -591,6 +601,96 @@ export const DEFAULT_TREASURY_POLICY: TreasuryPolicy = {
   maxTransfersPerTurn: 2,
   maxInferenceDailyCents: 50000,
   requireConfirmationAboveCents: 1000,
+  maxMonthlyTransferCents: 100000,
+  agentBudgetCents: 200000,
+  childBudgetCents: 50000,
+};
+
+/**
+ * Treasury policy used for a supervised, locked-down installation.
+ * Every monetary limit is zero: no transfer, x402 payment, or inference
+ * spend is permitted until an operator replaces these values.
+ */
+export const LOCKDOWN_TREASURY_POLICY: TreasuryPolicy = {
+  maxSingleTransferCents: 0,
+  maxHourlyTransferCents: 0,
+  maxDailyTransferCents: 0,
+  minimumReserveCents: 0,
+  maxX402PaymentCents: 0,
+  x402AllowedDomains: [],
+  transferCooldownMs: 0,
+  maxTransfersPerTurn: 0,
+  maxInferenceDailyCents: 0,
+  requireConfirmationAboveCents: 0,
+  maxMonthlyTransferCents: 0,
+  agentBudgetCents: 0,
+  childBudgetCents: 0,
+};
+
+// ─── Phase 8: Supervised Activation & Lockdown ──────────────────
+
+/** Phase 15: capability classes used by the central tool authorizer. */
+export type ToolCapability =
+  | 'read_only'
+  | 'filesystem_read'
+  | 'filesystem_write'
+  | 'shell_execution'
+  | 'network_access'
+  | 'external_api'
+  | 'financial'
+  | 'wallet_signing'
+  | 'agent_spawning'
+  | 'publishing'
+  | 'administrative';
+
+export interface SecurityConfig {
+  /** Deny-by-default tool execution. Default: true. */
+  lockdown: boolean;
+  /** Must be true (together with CONWAY_ACTIVATION=APPROVED) to run. Default: false. */
+  activationApproved: boolean;
+  /** Exact tool names permitted while locked down. Default: []. */
+  allowedTools: string[];
+  /** Permit financial tools. Default: false. */
+  allowFinancialTools: boolean;
+  /** Permit host shell and host file mutation tools. Default: false. */
+  allowHostShell: boolean;
+  /** Permit self-modification tools. Default: false. */
+  allowSelfModification: boolean;
+  /** Permit child-agent replication tools. Default: false. */
+  allowReplication: boolean;
+  /** Permit port exposure and domain registration. Default: false. */
+  allowExternalExposure: boolean;
+  /** Phase 15: capability classes granted in addition to allowedTools. Default: []. */
+  allowedCapabilities?: ToolCapability[];
+  /** Phase 15: tools explicitly revoked even if otherwise allowed. Default: []. */
+  revokedTools?: string[];
+  /** Phase 15: per-tool dispatch timeout in milliseconds. Default: 60000. */
+  maxToolDurationMs?: number;
+  /** Phase 15: maximum tool result size in bytes. Default: 65536. */
+  maxToolOutputBytes?: number;
+  /** Phase 15: enable application-level path/env sandbox checks. Default: true. */
+  sandboxEnabled?: boolean;
+  /** Phase 15: root that filesystem tools may write beneath. Default: HOME. */
+  sandboxRoot?: string;
+  /** Phase 15F: allow the mechanic to run pre-approved safe repairs. Default: false. */
+  selfHealingEnabled?: boolean;
+}
+
+export const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
+  lockdown: true,
+  activationApproved: false,
+  allowedTools: [],
+  allowFinancialTools: false,
+  allowHostShell: false,
+  allowSelfModification: false,
+  allowReplication: false,
+  allowExternalExposure: false,
+  allowedCapabilities: [],
+  revokedTools: [],
+  maxToolDurationMs: 60000,
+  maxToolOutputBytes: 65536,
+  sandboxEnabled: true,
+  selfHealingEnabled: false,
 };
 
 // ─── Phase 1: Inbox Message Status ──────────────────────────────
@@ -895,12 +995,24 @@ export type HeartbeatTaskFn = (
   taskCtx: HeartbeatLegacyContext,
 ) => Promise<{ shouldWake: boolean; message?: string }>;
 
+/**
+ * Credit-topup seam. Defaults to `conway/topup.ts:bootstrapTopup`; tests inject a stub so the
+ * heartbeat suite cannot perform a live x402 payment against api.conway.tech.
+ */
+export type HeartbeatTopupFn = (params: {
+  apiUrl: string;
+  account: AutomatonIdentity["account"];
+  creditsCents: number;
+  chainType: string;
+}) => Promise<{ success: boolean; amountUsd: number; creditsCentsAdded?: number; error?: string }>;
+
 export interface HeartbeatLegacyContext {
   identity: AutomatonIdentity;
   config: AutomatonConfig;
   db: AutomatonDatabase;
   conway: ConwayClient;
   social?: SocialClientInterface;
+  topup?: HeartbeatTopupFn;
 }
 
 export interface HeartbeatScheduleRow {

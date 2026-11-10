@@ -9,34 +9,28 @@
 
 import type { HttpClientConfig } from "../types.js";
 import { DEFAULT_HTTP_CLIENT_CONFIG } from "../types.js";
-
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+import { checkOutboundUrl } from "../security/url-guard.js";
 
 function assertSecureUrl(
   url: string,
   allowHttpOnLoopback: boolean,
 ): void {
-  let parsed: URL;
   try {
-    parsed = new URL(url);
+    new URL(url);
   } catch {
     throw new Error(`Invalid URL: ${url}`);
   }
 
-  const protocol = parsed.protocol.toLowerCase();
-  if (protocol === "https:") {
-    return;
+  // B-9: one guard for scheme, URL credentials, and private/link-local/metadata ranges.
+  const check = checkOutboundUrl(url, { allowHttpOnLoopback });
+  if (check.ok) return;
+  if (check.reason === "NON_LOOPBACK_HTTP" || check.reason === "HTTPS_REQUIRED") {
+    throw new Error(
+      `HTTPS required: refusing insecure URL ${url}. ` +
+        "For local development, only loopback HTTP (localhost/127.0.0.1/::1) can be explicitly enabled.",
+    );
   }
-
-  const host = parsed.hostname.toLowerCase();
-  if (protocol === "http:" && allowHttpOnLoopback && LOOPBACK_HOSTS.has(host)) {
-    return;
-  }
-
-  throw new Error(
-    `HTTPS required: refusing insecure URL ${url}. ` +
-      "For local development, only loopback HTTP (localhost/127.0.0.1/::1) can be explicitly enabled.",
-  );
+  throw new Error(`URL rejected by security guard (${check.reason})`);
 }
 
 export class CircuitOpenError extends Error {
@@ -82,6 +76,8 @@ export class ResilientHttpClient {
       try {
         const response = await fetch(url, {
           ...opts,
+          // B-9: a redirect is a second, unvalidated destination. Refuse it.
+          redirect: "error",
           signal: controller.signal,
           headers: {
             ...opts.headers,

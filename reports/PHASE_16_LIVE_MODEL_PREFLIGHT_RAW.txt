@@ -1,0 +1,64 @@
+### TIER 1: runtime (default, live state tree) — expect refusal
+Conway live-model pre-flight — 2026-11-01T08:44:01.430Z
+home=<repo-root>\runtime\home isolated=false tier=runtime
+FAIL  home.isolated_test_tree        homeGuardOk=true isolatedTestHome=false
+PASS  agent.activation_closed        activationApproved=false
+PASS  env.activation_flags_unset     CONWAY_ACTIVATION=unset CONWAY_ALLOW_WALLET_CREATION=unset
+PASS  lockdown.engaged               lockdown=true
+PASS  tools.allowlist_empty          allowedTools=0
+PASS  capabilities.no_privileged_grant none granted
+PASS  wallet.no_material             walletMaterialPresent=false
+FAIL  treasury.all_zero              non-zero: maxMonthlyTransferCents, agentBudgetCents, childBudgetCents
+PASS  credential.not_in_config       config holds no credential material
+PASS  treasury.x402_domains_empty    x402AllowedDomains=0
+PASS  financial.disabled             allowFinancialTools=false
+PASS  shell.disabled                 allowHostShell=false
+PASS  self_modification.disabled     allowSelfModification=false
+PASS  replication.disabled           allowReplication=false maxChildren=0
+PASS  publishing.disabled            allowExternalExposure=false
+PASS  sandbox.enabled                sandboxEnabled=true
+PASS  self_healing.disabled          selfHealingEnabled=false
+PASS  emergency_stop.not_engaged     engaged=false
+
+credentialPresent=false approvalPresent=false
+verdict=SAFETY_GATE_FAILED
+failed: home.isolated_test_tree, treasury.all_zero
+
+Verdict: SAFETY_GATE_FAILED. Safety gate failed: home.isolated_test_tree, treasury.all_zero. Fix the configuration; this script changes nothing.
+exit=2
+
+### TIER 2: --test-home runtime/home (spoof attempt) — expect HOME_NOT_ISOLATED
+HOME guard refused: HOME_NOT_ISOLATED — mode "isolated" requires a sandbox home, not the runtime home <repo-root>\runtime\home.
+exit=2
+
+### TIER 3: --test-home runtime/model-test-home — expect safety PASS, verdict PENDING
+Conway live-model pre-flight — 2026-11-01T08:44:02.960Z
+home=<repo-root>\runtime\model-test-home isolated=true tier=isolated-test-home
+PASS  home.isolated_test_tree        homeGuardOk=true isolatedTestHome=true
+PASS  agent.activation_closed        activationApproved=false
+PASS  env.activation_flags_unset     CONWAY_ACTIVATION=unset CONWAY_ALLOW_WALLET_CREATION=unset
+PASS  lockdown.engaged               lockdown=true
+PASS  tools.allowlist_empty          allowedTools=0
+PASS  capabilities.no_privileged_grant none granted
+PASS  wallet.no_material             walletMaterialPresent=false
+PASS  treasury.all_zero              all treasury limits are 0
+PASS  credential.not_in_config       config holds no credential material
+PASS  treasury.x402_domains_empty    x402AllowedDomains=0
+PASS  financial.disabled             allowFinancialTools=false
+PASS  shell.disabled                 allowHostShell=false
+PASS  self_modification.disabled     allowSelfModification=false
+PASS  replication.disabled           allowReplication=false maxChildren=0
+PASS  publishing.disabled            allowExternalExposure=false
+PASS  sandbox.enabled                sandboxEnabled=true
+PASS  self_healing.disabled          selfHealingEnabled=false
+PASS  emergency_stop.not_engaged     engaged=false
+
+credentialPresent=false approvalPresent=false
+verdict=PENDING_CREDENTIAL_APPROVAL
+
+Verdict: PENDING_CREDENTIAL_APPROVAL. No credential in the environment, or CONWAY_LIVE_MODEL_APPROVED=APPROVED not set by a human. Nothing was activated.
+exit=1
+
+### TIER 4: --test-home <missing dir> — expect HOME_NOT_A_DIRECTORY
+HOME guard refused: HOME_NOT_A_DIRECTORY — HOME does not resolve to an existing directory: <repo-root>\runtime\no-such-home
+exit=2

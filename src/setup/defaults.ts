@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { joinTilde } from "../runtime/home-guard.js";
 
 export function generateSoulMd(
   name: string,
@@ -113,7 +114,7 @@ const DEFAULT_SKILLS: { dir: string; content: string }[] = [
 
 export function installDefaultSkills(skillsDir: string): void {
   const resolved = skillsDir.startsWith("~")
-    ? path.join(process.env.HOME || "/root", skillsDir.slice(1))
+    ? joinTilde(skillsDir)
     : skillsDir;
 
   for (const skill of DEFAULT_SKILLS) {

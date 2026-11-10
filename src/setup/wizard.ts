@@ -146,6 +146,11 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
       "Max daily inference spend (cents)", DEFAULT_TREASURY_POLICY.maxInferenceDailyCents),
     requireConfirmationAboveCents: await promptWithDefault(
       "Require confirmation above (cents)", DEFAULT_TREASURY_POLICY.requireConfirmationAboveCents),
+    // Phase 15 monthly/agent/child budgets: default to 0 (fail-closed) under the
+    // locked-down posture. Operators can raise them explicitly via --configure.
+    maxMonthlyTransferCents: 0,
+    agentBudgetCents: 0,
+    childBudgetCents: 0,
   };
 
   console.log(chalk.green("  Treasury policy configured.\n"));

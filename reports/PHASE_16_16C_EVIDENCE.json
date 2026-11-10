@@ -1,0 +1,424 @@
+{
+  "live": {
+    "file": "<repo-root>\\runtime\\home\\.automaton\\state.db",
+    "bytes": 512000,
+    "sha256": "2a8aeb3494f1507a352f591c5ef40b7320813e18796b077b01448582619efbba",
+    "integrity": "ok",
+    "journalMode": "wal",
+    "userVersion": 0,
+    "tables": [
+      {
+        "table": "child_lifecycle_events",
+        "rows": 0
+      },
+      {
+        "table": "children",
+        "rows": 0
+      },
+      {
+        "table": "discovered_agents_cache",
+        "rows": 0
+      },
+      {
+        "table": "episodic_memory",
+        "rows": 0
+      },
+      {
+        "table": "event_stream",
+        "rows": 0
+      },
+      {
+        "table": "goals",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_dedup",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_entries",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_history",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_schedule",
+        "rows": 0
+      },
+      {
+        "table": "identity",
+        "rows": 0
+      },
+      {
+        "table": "inbox_messages",
+        "rows": 0
+      },
+      {
+        "table": "inference_costs",
+        "rows": 0
+      },
+      {
+        "table": "installed_tools",
+        "rows": 0
+      },
+      {
+        "table": "knowledge_store",
+        "rows": 0
+      },
+      {
+        "table": "kv",
+        "rows": 0
+      },
+      {
+        "table": "metric_snapshots",
+        "rows": 0
+      },
+      {
+        "table": "model_registry",
+        "rows": 0
+      },
+      {
+        "table": "modifications",
+        "rows": 0
+      },
+      {
+        "table": "onchain_transactions",
+        "rows": 0
+      },
+      {
+        "table": "policy_decisions",
+        "rows": 0
+      },
+      {
+        "table": "procedural_memory",
+        "rows": 0
+      },
+      {
+        "table": "registry",
+        "rows": 0
+      },
+      {
+        "table": "relationship_memory",
+        "rows": 0
+      },
+      {
+        "table": "reputation",
+        "rows": 0
+      },
+      {
+        "table": "schema_version",
+        "rows": 10
+      },
+      {
+        "table": "semantic_memory",
+        "rows": 0
+      },
+      {
+        "table": "session_summaries",
+        "rows": 0
+      },
+      {
+        "table": "skills",
+        "rows": 0
+      },
+      {
+        "table": "soul_history",
+        "rows": 0
+      },
+      {
+        "table": "spend_tracking",
+        "rows": 0
+      },
+      {
+        "table": "task_graph",
+        "rows": 0
+      },
+      {
+        "table": "tool_calls",
+        "rows": 0
+      },
+      {
+        "table": "transactions",
+        "rows": 0
+      },
+      {
+        "table": "turns",
+        "rows": 0
+      },
+      {
+        "table": "wake_events",
+        "rows": 0
+      },
+      {
+        "table": "working_memory",
+        "rows": 0
+      }
+    ],
+    "summary": {
+      "tables": 37,
+      "nonEmptyTables": [
+        "schema_version=10"
+      ],
+      "totalRows": 10
+    },
+    "schemaVersionRows": [
+      {
+        "version": 2,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 3,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 4,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 5,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 6,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 7,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 8,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 9,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 10,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 11,
+        "applied_at": "2026-10-31 10:25:59"
+      }
+    ]
+  },
+  "archive": {
+    "file": "<repo-root>\\backups\\2026-11-01_08-24-20\\state.db",
+    "bytes": 512000,
+    "sha256": "2cc9d26ce4a20b3bd9a04d92c8c3a7940380ecd81665eacf9c215cd2faf765ff",
+    "integrity": "ok",
+    "journalMode": "wal",
+    "userVersion": 0,
+    "tables": [
+      {
+        "table": "child_lifecycle_events",
+        "rows": 0
+      },
+      {
+        "table": "children",
+        "rows": 0
+      },
+      {
+        "table": "discovered_agents_cache",
+        "rows": 0
+      },
+      {
+        "table": "episodic_memory",
+        "rows": 0
+      },
+      {
+        "table": "event_stream",
+        "rows": 0
+      },
+      {
+        "table": "goals",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_dedup",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_entries",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_history",
+        "rows": 0
+      },
+      {
+        "table": "heartbeat_schedule",
+        "rows": 0
+      },
+      {
+        "table": "identity",
+        "rows": 0
+      },
+      {
+        "table": "inbox_messages",
+        "rows": 0
+      },
+      {
+        "table": "inference_costs",
+        "rows": 0
+      },
+      {
+        "table": "installed_tools",
+        "rows": 0
+      },
+      {
+        "table": "knowledge_store",
+        "rows": 0
+      },
+      {
+        "table": "kv",
+        "rows": 0
+      },
+      {
+        "table": "metric_snapshots",
+        "rows": 0
+      },
+      {
+        "table": "model_registry",
+        "rows": 0
+      },
+      {
+        "table": "modifications",
+        "rows": 0
+      },
+      {
+        "table": "onchain_transactions",
+        "rows": 0
+      },
+      {
+        "table": "policy_decisions",
+        "rows": 0
+      },
+      {
+        "table": "procedural_memory",
+        "rows": 0
+      },
+      {
+        "table": "registry",
+        "rows": 0
+      },
+      {
+        "table": "relationship_memory",
+        "rows": 0
+      },
+      {
+        "table": "reputation",
+        "rows": 0
+      },
+      {
+        "table": "schema_version",
+        "rows": 10
+      },
+      {
+        "table": "semantic_memory",
+        "rows": 0
+      },
+      {
+        "table": "session_summaries",
+        "rows": 0
+      },
+      {
+        "table": "skills",
+        "rows": 0
+      },
+      {
+        "table": "soul_history",
+        "rows": 0
+      },
+      {
+        "table": "spend_tracking",
+        "rows": 0
+      },
+      {
+        "table": "task_graph",
+        "rows": 0
+      },
+      {
+        "table": "tool_calls",
+        "rows": 0
+      },
+      {
+        "table": "transactions",
+        "rows": 0
+      },
+      {
+        "table": "turns",
+        "rows": 0
+      },
+      {
+        "table": "wake_events",
+        "rows": 0
+      },
+      {
+        "table": "working_memory",
+        "rows": 0
+      }
+    ],
+    "summary": {
+      "tables": 37,
+      "nonEmptyTables": [
+        "schema_version=10"
+      ],
+      "totalRows": 10
+    },
+    "schemaVersionRows": [
+      {
+        "version": 2,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 3,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 4,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 5,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 6,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 7,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 8,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 9,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 10,
+        "applied_at": "2026-10-31 10:25:59"
+      },
+      {
+        "version": 11,
+        "applied_at": "2026-10-31 10:25:59"
+      }
+    ]
+  },
+  "comparison": {
+    "sameTableCount": true,
+    "sameNonEmptySet": true,
+    "sameTotalRows": true,
+    "sameSchemaVersionRows": true,
+    "sha256LiveEqualsArchive": false,
+    "bytesLiveEqualsArchive": true
+  }
+}

@@ -12,7 +12,8 @@ import path from "path";
 import { getWallet, getAutomatonDir } from "./identity/wallet.js";
 import { provision, loadApiKeyFromConfig } from "./identity/provision.js";
 import { loadConfig, resolvePath } from "./config.js";
-import { createDatabase } from "./state/database.js";
+import { createDatabase, readStatusSnapshot, ReadOnlyDatabaseError, type StatusSnapshot } from "./state/database.js";
+import { runSchemaMigration } from "./state/schema-migration.js";
 import { createConwayClient } from "./conway/client.js";
 import { createInferenceClient } from "./conway/inference.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
@@ -29,9 +30,13 @@ import { createSocialClient } from "./social/client.js";
 import { PolicyEngine } from "./agent/policy-engine.js";
 import { SpendTracker } from "./agent/spend-tracker.js";
 import { createDefaultRules } from "./agent/policy-rules/index.js";
+import { checkActivation } from "./security/activation.js";
+import { validateEndpointUrl } from "./security/url-guard.js";
+import { TreasuryGuard } from "./security/treasury-guard.js";
 import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface } from "./types.js";
-import { DEFAULT_TREASURY_POLICY } from "./types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_SECURITY_CONFIG } from "./types.js";
 import { createLogger, setGlobalLogLevel, StructuredLogger } from "./observability/logger.js";
+import { assertConwayHome, HomeGuardError } from "./runtime/home-guard.js";
 import { prettySink } from "./observability/pretty-sink.js";
 import { bootstrapTopup } from "./conway/topup.js";
 import { randomUUID } from "crypto";
@@ -40,8 +45,48 @@ import { keccak256, toHex } from "viem";
 const logger = createLogger("main");
 const VERSION = "0.2.1";
 
+/**
+ * Refuse commands that create a wallet, register an identity, or start
+ * autonomous execution unless a human explicitly approved activation.
+ */
+function requireActivation(command: string): void {
+  const config = loadConfig();
+  const status = checkActivation(config ?? { security: DEFAULT_SECURITY_CONFIG });
+  if (status.approved) return;
+
+  logger.error(`Blocked "${command}": runtime activation is not approved.`);
+  logger.error(`Reason: ${status.reason}`);
+  logger.error(
+    "To approve: set security.activationApproved=true in automaton.json and run with CONWAY_ACTIVATION=APPROVED.",
+  );
+  process.exit(2);
+}
+
+/**
+ * Refuse to touch any Conway state tree unless HOME is the documented runtime home.
+ *
+ * `~` in this project's config resolves through `process.env.HOME`, and the .bat wrappers
+ * point it at runtime\home. Run without that environment, the same command silently reads
+ * and writes a different install — which is how Phase 15 ended up signing a database that
+ * did not exist and reporting a PASS for it. `CONWAY_HOME_MODE=isolated` is the opt-in for
+ * the soak, backup and test harnesses, which legitimately run against a scratch home.
+ */
+function requireConwayHome(): void {
+  const mode = process.env.CONWAY_HOME_MODE === "isolated" ? "isolated" : "runtime";
+  try {
+    logger.info(assertConwayHome({ mode }).message);
+  } catch (err) {
+    if (err instanceof HomeGuardError) {
+      logger.error(`Blocked: ${err.message}`);
+      process.exit(2);
+    }
+    throw err;
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  requireConwayHome();
 
   // ─── CLI Commands ────────────────────────────────────────────
 
@@ -62,7 +107,8 @@ Usage:
   automaton --pick-model   Interactively pick the active inference model
   automaton --init         Initialize wallet and config directory
   automaton --provision    Provision Conway API key via SIWE
-  automaton --status       Show current automaton status
+  automaton --status       Show current automaton status (read-only: never creates, writes or migrates a database)
+  automaton --migrate-schema  Advance the database schema (requires CONWAY_MIGRATION_APPROVAL=APPROVED)
   automaton --version      Show version
   automaton --help         Show this help
 
@@ -70,11 +116,16 @@ Environment:
   CONWAY_API_URL           Conway API URL (default: https://api.conway.tech)
   CONWAY_API_KEY           Conway API key (overrides config)
   OLLAMA_BASE_URL          Ollama base URL (overrides config, e.g. http://localhost:11434)
+  CONWAY_MIGRATION_APPROVAL        Must be exactly APPROVED for --migrate-schema. Schema only: it does not
+                                   and cannot activate the agent.
+  CONWAY_MIGRATION_ALLOW_CANONICAL Must additionally be exactly APPROVED before --migrate-schema will touch
+                                   a database inside the canonical runtime home.
 `);
     process.exit(0);
   }
 
   if (args.includes("--init")) {
+    requireActivation("--init");
     // Read chain type from genesis.json if written by parent during spawn
     let initChainType: import("./identity/chain.js").ChainType | undefined;
     try {
@@ -96,6 +147,7 @@ Environment:
   }
 
   if (args.includes("--provision")) {
+    requireActivation("--provision");
     try {
       const result = await provision();
       logger.info(JSON.stringify(result));
@@ -111,7 +163,28 @@ Environment:
     process.exit(0);
   }
 
+  if (args.includes("--migrate-schema")) {
+    const databaseFlag = args.indexOf("--database");
+    const requested = databaseFlag !== -1 ? args[databaseFlag + 1] : undefined;
+    const config = loadConfig();
+    let dbPath: string;
+    if (requested) {
+      dbPath = resolvePath(requested);
+    } else if (config) {
+      dbPath = resolvePath(config.dbPath);
+    } else {
+      logger.error('Refusing "--migrate-schema": no configuration, so no database path to migrate.');
+      process.exit(2);
+      return;
+    }
+    const result = runSchemaMigration({ dbPath });
+    logger.info(result.message);
+    if (result.reportPath) logger.info(`Migration report: ${result.reportPath}`);
+    process.exit(result.exitCode);
+  }
+
   if (args.includes("--setup")) {
+    requireActivation("--setup");
     const { runSetupWizard } = await import("./setup/wizard.js");
     await runSetupWizard();
     process.exit(0);
@@ -142,6 +215,15 @@ Environment:
 
 // ─── Status Command ────────────────────────────────────────────
 
+/**
+ * Print the automaton's status from a read-only handle.
+ *
+ * This used to call createDatabase(), which mkdirs the state directory, switches the
+ * journal to WAL, creates any missing table, runs every pending migration and writes a
+ * schema_version row. "Check on things" was therefore a write, and could advance the
+ * schema of a database nobody meant to change (F-18-01). The figures printed below are
+ * the same seven getters reduced to counts, gathered over the same file.
+ */
 async function showStatus(): Promise<void> {
   const config = loadConfig();
   if (!config) {
@@ -150,15 +232,17 @@ async function showStatus(): Promise<void> {
   }
 
   const dbPath = resolvePath(config.dbPath);
-  const db = createDatabase(dbPath);
-
-  const state = db.getAgentState();
-  const turnCount = db.getTurnCount();
-  const tools = db.getInstalledTools();
-  const heartbeats = db.getHeartbeatEntries();
-  const skills = db.getSkills(true);
-  const children = db.getChildren();
-  const registry = db.getRegistryEntry();
+  let snapshot: StatusSnapshot;
+  try {
+    snapshot = readStatusSnapshot(dbPath);
+  } catch (error) {
+    if (error instanceof ReadOnlyDatabaseError) {
+      logger.error(`Status unavailable: ${error.message}`);
+      process.exit(1);
+      return;
+    }
+    throw error;
+  }
 
   logger.info(`
 === AUTOMATON STATUS ===
@@ -166,19 +250,17 @@ Name:       ${config.name}
 Address:    ${config.walletAddress}
 Creator:    ${config.creatorAddress}
 Sandbox:    ${config.sandboxId}
-State:      ${state}
-Turns:      ${turnCount}
-Tools:      ${tools.length} installed
-Skills:     ${skills.length} active
-Heartbeats: ${heartbeats.filter((h) => h.enabled).length} active
-Children:   ${children.filter((c) => c.status !== "dead").length} alive / ${children.length} total
-Agent ID:   ${registry?.agentId || "not registered"}
+State:      ${snapshot.agentState}
+Turns:      ${snapshot.turnCount}
+Tools:      ${snapshot.enabledToolCount} installed
+Skills:     ${snapshot.enabledSkillCount} active
+Heartbeats: ${snapshot.enabledHeartbeatCount} active
+Children:   ${snapshot.aliveChildCount} alive / ${snapshot.totalChildCount} total
+Agent ID:   ${snapshot.registryAgentId || "not registered"}
 Model:      ${config.inferenceModel}
 Version:    ${config.version}
 ========================
 `);
-
-  db.close();
 }
 
 // ─── Main Run ──────────────────────────────────────────────────
@@ -186,11 +268,25 @@ Version:    ${config.version}
 async function run(): Promise<void> {
   logger.info(`[${new Date().toISOString()}] Conway Automaton v${VERSION} starting...`);
 
-  // Load config — first run triggers interactive setup wizard
+  // Load config. First-run setup is intentionally NOT automatic: it creates a
+  // wallet and registers an identity, which requires explicit human approval.
   let config = loadConfig();
   if (!config) {
-    const { runSetupWizard } = await import("./setup/wizard.js");
-    config = await runSetupWizard();
+    logger.error("No configuration found at automaton.json. Refusing to run automatic setup.");
+    logger.error(
+      "Create the config from the template, set security.activationApproved=true, and run with CONWAY_ACTIVATION=APPROVED.",
+    );
+    process.exit(2);
+  }
+
+  const activation = checkActivation(config);
+  if (!activation.approved) {
+    logger.error(`Blocked "--run": runtime activation is not approved.`);
+    logger.error(`Reason: ${activation.reason}`);
+    logger.error(
+      "To approve: set security.activationApproved=true in automaton.json and run with CONWAY_ACTIVATION=APPROVED.",
+    );
+    process.exit(2);
   }
 
   // Load wallet (chain-aware)
@@ -238,6 +334,13 @@ async function run(): Promise<void> {
     db.setIdentity("automatonId", automatonId);
   }
 
+  // B-9: validate the Conway API endpoint before any network call.
+  const conwayUrlCheck = validateEndpointUrl(config.conwayApiUrl, "conway_api");
+  if (!conwayUrlCheck.ok) {
+    logger.error(`Blocked "--run": Conway API URL failed security validation (${conwayUrlCheck.reason}).`);
+    process.exit(2);
+  }
+
   // Create Conway client
   const conway = createConwayClient({
     apiUrl: config.conwayApiUrl,
@@ -278,7 +381,15 @@ async function run(): Promise<void> {
   }
 
   // Resolve Ollama base URL: env var takes precedence over config
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
+  const rawOllamaUrl = process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
+  if (rawOllamaUrl) {
+    const ollamaCheck = validateEndpointUrl(rawOllamaUrl, "ollama");
+    if (!ollamaCheck.ok) {
+      logger.error(`Blocked "--run": Ollama base URL failed security validation (${ollamaCheck.reason}).`);
+      process.exit(2);
+    }
+  }
+  const ollamaBaseUrl = rawOllamaUrl;
 
   // Create inference client — pass a live registry lookup so model names like
   // "gpt-oss:120b" route to Ollama based on their registered provider, not heuristics.
@@ -309,7 +420,8 @@ async function run(): Promise<void> {
 
   // Initialize PolicyEngine + SpendTracker (Phase 1.4)
   const treasuryPolicy = config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY;
-  const rules = createDefaultRules(treasuryPolicy);
+  const security = config.security ?? DEFAULT_SECURITY_CONFIG;
+  const rules = createDefaultRules(treasuryPolicy, security);
   const policyEngine = new PolicyEngine(db.raw, rules);
   const spendTracker = new SpendTracker(db.raw);
 
@@ -338,6 +450,9 @@ async function run(): Promise<void> {
 
   // Bootstrap topup: buy minimum credits ($5) from USDC so the agent can start.
   // The agent decides larger topups itself via the topup_credits tool.
+  // Disabled entirely under lockdown unless financial tools are enabled.
+  const bootstrapTopupAllowed = !security.lockdown || security.allowFinancialTools === true;
+  if (bootstrapTopupAllowed) {
   try {
     let bootstrapTimer: ReturnType<typeof setTimeout>;
     const bootstrapTimeout = new Promise<null>((_, reject) => {
@@ -347,12 +462,35 @@ async function run(): Promise<void> {
       await Promise.race([
         (async () => {
           const creditsCents = await conway.getCreditsBalance().catch(() => 0);
+          const bootstrapGuard = new TreasuryGuard(db.raw, treasuryPolicy);
+          let bootstrapAuthorizationId: string | null = null;
+          const dayBucket = new Date().toISOString().slice(0, 10);
           const topupResult = await bootstrapTopup({
             apiUrl: config.conwayApiUrl,
             account,
             creditsCents,
             chainType: resolvedChainType,
+            authorize: (amountCents) => {
+              try {
+                const decision = bootstrapGuard.authorize({
+                  operation: "credit_purchase",
+                  toolName: "bootstrap_topup",
+                  amountCents,
+                  idempotencyKey: `bootstrap:${dayBucket}:${amountCents}`,
+                  actor: identity.address,
+                });
+                if (decision.allowed) bootstrapAuthorizationId = decision.authorizationId;
+                return { allowed: decision.allowed, reason: decision.message };
+              } catch {
+                return { allowed: false, reason: "treasury unavailable" };
+              }
+            },
           });
+          if (topupResult?.success && typeof bootstrapAuthorizationId === "string") {
+            try { bootstrapGuard.commit(bootstrapAuthorizationId); } catch { /* audit best effort */ }
+          } else if (typeof bootstrapAuthorizationId === "string") {
+            try { bootstrapGuard.release(bootstrapAuthorizationId, "bootstrap_failed"); } catch { /* audit best effort */ }
+          }
           if (topupResult?.success) {
             logger.info(
               `[${new Date().toISOString()}] Bootstrap topup: +$${topupResult.amountUsd} credits from USDC`,
@@ -366,6 +504,9 @@ async function run(): Promise<void> {
     }
   } catch (err: any) {
     logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
+  }
+  } else {
+    logger.info(`[${new Date().toISOString()}] Bootstrap topup disabled by lockdown policy.`);
   }
 
   // Start heartbeat daemon (Phase 1.1: DurableScheduler)

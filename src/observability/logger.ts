@@ -12,6 +12,37 @@ import { LOG_LEVEL_PRIORITY } from "../types.js";
 let globalLogLevel: LogLevel = "info";
 let customSink: ((entry: LogEntry) => void) | null = null;
 
+/**
+ * B-6: no credential, token or private key may reach a log sink. Callers are expected
+ * not to log secrets; this is the backstop for the call site that forgets. Redaction is
+ * applied to context values, messages and error text before the entry leaves the process.
+ */
+const SENSITIVE_KEY =
+  /(api[-_]?key|apikey|authorization|auth[-_]?token|access[-_]?token|refresh[-_]?token|bearer|password|passwd|secret|private[-_]?key|seed[-_]?phrase|mnemonic|credential|cookie|session[-_]?id|token$)/i;
+const REDACTED = "[REDACTED]";
+
+function redactString(text: string): string {
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`)
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, REDACTED)
+    .replace(/\b0x[0-9a-f]{64}\b/gi, REDACTED);
+}
+
+function redactValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "[depth-limited]";
+  if (typeof value === "string") return redactString(value);
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, depth + 1));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = SENSITIVE_KEY.test(key) ? REDACTED : redactValue(item, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+
 export function setGlobalLogLevel(level: LogLevel): void {
   globalLogLevel = level;
 }
@@ -77,17 +108,17 @@ export class StructuredLogger {
         timestamp: new Date().toISOString(),
         level,
         module: this.module,
-        message,
+        message: redactString(message),
       };
 
       if (context && Object.keys(context).length > 0) {
-        entry.context = context;
+        entry.context = redactValue(context) as Record<string, unknown>;
       }
 
       if (error) {
         entry.error = {
-          message: error.message,
-          stack: error.stack,
+          message: redactString(error.message),
+          stack: error.stack ? redactString(error.stack) : undefined,
         };
         if ((error as any).code) {
           entry.error.code = (error as any).code;

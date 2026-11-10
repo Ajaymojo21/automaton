@@ -1,0 +1,5 @@
+npm-cache: children=6 newest=2026-11-01T07:53:47.893Z (_logs)
+pnpm-cache: children=1 newest=2026-10-31T09:26:51.595Z (metadata-v1.3)
+pnpm-state: children=1 newest=2026-10-31T09:26:51.598Z (pnpm-state.json)
+pnpm: ABSENT (ENOENT)
+home=<repo-root>\runtime\home  homedir=<user-home>

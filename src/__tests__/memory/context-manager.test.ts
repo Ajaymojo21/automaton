@@ -87,6 +87,31 @@ describe("createTokenCounter", () => {
     expect(counter.cache.has("default::evict-0")).toBe(false);
     expect(counter.cache.has("default::evict-10004")).toBe(true);
   });
+
+  it("keeps counting bounded on long repetitive text", () => {
+    // Regression: the encoder's merge loop was superlinear, so one 250k-character
+    // run of a single token did not finish and stalled the context budget path
+    // (measured before the fix: 4k took 970ms, 50k+ did not return within 60s).
+    const counter = createTokenCounter();
+    counter.countTokens("warm");
+
+    const startedAt = performance.now();
+    const tokens = counter.countTokens("x".repeat(250_000));
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(tokens).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(5_000);
+  });
+
+  it("scales the bounded estimate with input length", () => {
+    const counter = createTokenCounter();
+    const small = counter.countTokens("x".repeat(4_000));
+    const large = counter.countTokens("x".repeat(400_000));
+
+    expect(large).toBeGreaterThan(small);
+    expect(large / small).toBeGreaterThan(50);
+    expect(large / small).toBeLessThan(200);
+  });
 });
 
 describe("ContextManager.assembleContext", () => {

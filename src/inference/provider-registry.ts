@@ -1,5 +1,11 @@
 import fs from "node:fs";
 import OpenAI from "openai";
+import { createLogger } from "../observability/logger.js";
+import {
+  ProviderUrlError,
+  createProviderFetch,
+  validateProviderBaseUrl,
+} from "./provider-url.js";
 
 export type ModelTier = "reasoning" | "fast" | "cheap";
 
@@ -264,9 +270,11 @@ export class ProviderRegistry {
 
   overrideBaseUrl(providerId: string, baseUrl: string): void {
     const provider = this.providers.find((p) => p.id === providerId);
-    if (provider) {
-      provider.baseUrl = baseUrl;
+    if (!provider) {
+      return;
     }
+
+    provider.baseUrl = validateProviderBaseUrl(baseUrl, providerId);
   }
 
   static fromConfig(configPath: string): ProviderRegistry {
@@ -281,8 +289,17 @@ export class ProviderRegistry {
     try {
       const raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as ProviderConfigFile;
       const configuredProviders = normalizeProviders(raw.providers);
-      if (configuredProviders.length > 0) {
+      if (Array.isArray(raw.providers)) {
+        // A file that declares a provider list owns it: an entry that fails URL validation is
+        // excluded (see normalizeProviders), and a list that admits nothing must not revert to
+        // the shipped cloud defaults.
         providers = configuredProviders;
+        if (providers.length === 0) {
+          registryLogger.warn("no provider in the configuration passed validation", {
+            configPath,
+            declared: raw.providers.length,
+          });
+        }
       }
 
       if (raw.tierDefaults && typeof raw.tierDefaults === "object") {
@@ -431,9 +448,11 @@ export class ProviderRegistry {
 
   private buildResolvedModel(provider: ProviderConfig, model: ModelConfig): ResolvedModel {
     const apiKey = this.resolveApiKey(provider);
+    const baseUrl = validateProviderBaseUrl(provider.baseUrl, provider.id);
     const client = new OpenAI({
       apiKey,
-      baseURL: provider.baseUrl,
+      baseURL: baseUrl,
+      fetch: createProviderFetch(baseUrl, provider.id),
     });
 
     return {
@@ -512,6 +531,14 @@ export class ProviderRegistry {
   }
 }
 
+const registryLogger = createLogger("inference.provider-registry");
+
+function excludeProvider(providerId: string, error: unknown): void {
+  const reason = error instanceof ProviderUrlError ? error.reason : "CONFIGURATION_ERROR";
+  const message = error instanceof Error ? error.message : String(error);
+  registryLogger.warn(`provider '${providerId}' excluded from inference`, { reason, message });
+}
+
 function normalizeProviders(input: unknown): ProviderConfig[] {
   if (!Array.isArray(input)) {
     return [];
@@ -519,6 +546,7 @@ function normalizeProviders(input: unknown): ProviderConfig[] {
 
   const defaultsById = new Map(DEFAULT_PROVIDERS.map((provider) => [provider.id, provider]));
   const normalized: ProviderConfig[] = [];
+  const admittedIds = new Set<string>();
 
   for (const rawProvider of input) {
     if (!rawProvider || typeof rawProvider !== "object") {
@@ -537,10 +565,25 @@ function normalizeProviders(input: unknown): ProviderConfig[] {
       continue;
     }
 
+    if (admittedIds.has(id)) {
+      excludeProvider(id, new Error("a provider with this id was already admitted"));
+      continue;
+    }
+
+    const declaredBaseUrl = stringOr(candidate.baseUrl, fallback?.baseUrl ?? "");
+    let baseUrl: string;
+    try {
+      baseUrl = validateProviderBaseUrl(declaredBaseUrl, id);
+    } catch (error) {
+      excludeProvider(id, error);
+      continue;
+    }
+
+    admittedIds.add(id);
     normalized.push({
       id,
       name: stringOr(candidate.name, fallback?.name ?? id),
-      baseUrl: stringOr(candidate.baseUrl, fallback?.baseUrl ?? "https://api.openai.com/v1"),
+      baseUrl,
       apiKeyEnvVar: stringOr(candidate.apiKeyEnvVar, fallback?.apiKeyEnvVar ?? "OPENAI_API_KEY"),
       models,
       maxRequestsPerMinute: numberOr(candidate.maxRequestsPerMinute, fallback?.maxRequestsPerMinute ?? 600),

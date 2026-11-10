@@ -1,0 +1,202 @@
+
+=== Operating system ===
+
+
+Caption        : Microsoft Windows 11 Home Single Language
+Version        : 10.0.26300
+BuildNumber    : 26300
+OSArchitecture : 64-bit
+Locale         : 0409
+LastBootUpTime : 31-10-2026 10:27:51
+
+
+
+
+=== System / virtualisation ===
+
+
+Manufacturer      : LENOVO
+Model             : 83DV
+SystemType        : x64-based PC
+HypervisorPresent : True
+PartNumber        : 
+
+
+
+
+=== BitLocker volumes (Get-BitLockerVolume, non-key properties only) ===
+Get-CimInstance : Access denied 
+At C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules\BitLocker\BitLocker.psm1:144 char:13
++             Get-CimInstance `
++             ~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (root\cimv2\Secu...cryptableVolume:String) [Get-CimInstance], CimExcep 
+   tion
+    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand
+ 
+Get-Win32EncryptableVolumeInternal :  does not have an associated BitLocker volume.
+At C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules\BitLocker\BitLocker.psm1:704 char:42
++ ...       $AllWin32EncryptableVolume = Get-Win32EncryptableVolumeInternal
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], COMException
+    + FullyQualifiedErrorId : System.Runtime.InteropServices.COMException,Get-Win32EncryptableVolumeInternal
+
+
+=== BitLocker status (manage-bde -status, read-only) ===
+BitLocker Drive Encryption: Configuration Tool version 10.0.26100
+Copyright (C) 2013 Microsoft Corporation. All rights reserved.
+
+ERROR: An attempt to access a required resource was denied.
+
+Check that you have administrative rights on the computer.
+
+
+=== BitLocker WMI class (root\Microsoft\Windows\BitLocker) ===
+UNAVAILABLE: Invalid namespace 
+
+=== TPM ===
+
+
+TpmPresent  : 
+TpmReady    : 
+TpmEnabled  : 
+Owned       : 
+IsActivated : 
+
+
+
+
+=== Secure Boot ===
+UNAVAILABLE: Unable to set proper privileges. Access was denied.
+
+=== Microsoft Defender status ===
+
+
+AMServiceEnabled          : True
+AntivirusEnabled          : True
+RealTimeProtectionEnabled : True
+BehaviorMonitorEnabled    : True
+IAVEnabled                : 
+NISEnabled                : True
+SignatureAge              : 
+FullScanAge               : 4294967295
+AutoUpdateEnabled         : 
+
+
+
+
+=== Controlled folder access ===
+EnableControlledFolderAccess = 0
+
+=== Windows Firewall profiles ===
+
+Name    Enabled DefaultInboundAction DefaultOutboundAction AllowLocalFirewallRules Notifications
+----    ------- -------------------- --------------------- ----------------------- -------------
+Domain     True        NotConfigured         NotConfigured           NotConfigured              
+Private    True        NotConfigured         NotConfigured           NotConfigured              
+Public     True        NotConfigured         NotConfigured           NotConfigured              
+
+
+
+
+=== Security services ===
+
+Name       Status StartType
+----       ------ ---------
+AppIDSvc  Stopped    Manual
+BFE       Running Automatic
+WinDefend Running Automatic
+
+
+
+
+=== UAC policy ===
+
+
+EnableLUA                     : 1
+PromptOnSecureDesktop         : 1
+ConsentPromptBehaviorAdmin    : 5
+FilterAdministratorToken      : 
+LocalAccountTokenFilterPolicy : 
+
+
+
+
+=== Elevation of this session ===
+IsAdmin = False
+User = <host-name>\<windows-user>
+
+=== Listening TCP sockets ===
+::: 135,445,3001,49664,49665,49666,49667,49668,49672,50131
+::1: 42050,49669
+127.0.0.1: 3002,3457,3601,11434,20131,20132,49375,49535,61884
+0.0.0.0: 135,5040,20128,49664,49665,49666,49667,49668,49672
+<host-lan-ip>: 139
+
+=== Conway-related processes ===
+
+
+==================================================================
+SECOND CAPTURE PASS 2026-10-31 22:55 (re-verification of PID 15168
+ownership + firewall exception scope; read-only, nothing changed)
+==================================================================
+
+
+ProcessId      : 15168
+CreationDate   : 31-10-2026 10:28:23
+ExecutablePath : C:\Program Files\nodejs\node.exe
+CommandLine    : "C:\Program Files\nodejs\node.exe" dist/index.js 
+
+
+
+
+
+ProcessId   : 9516
+Name        : powershell.exe
+CommandLine : "powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<freellmapi-root>
+              \scripts\freellmapi-service.ps1"
+
+ProcessId   : 3792
+Name        : conhost.exe
+CommandLine : \??\C:\WINDOWS\system32\conhost.exe 0x4
+
+
+
+=== netstat ===
+  TCP    0.0.0.0:3001           0.0.0.0:0              LISTENING       15168
+  TCP    127.0.0.1:62380        127.0.0.1:3001         TIME_WAIT       0
+
+Name     InterfaceAlias NetworkCategory
+----     -------------- ---------------
+mojo5G 2 Wi-Fi                   Public
+
+
+
+
+Enabled   : True
+Direction : Inbound
+Action    : Allow
+Profile   : Public
+Program   : C:\program files\nodejs\node.exe
+
+Enabled   : True
+Direction : Inbound
+Action    : Allow
+Profile   : Public
+Program   : C:\program files\nodejs\node.exe
+
+
+
+
+Domain Profile Settings: 
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Private Profile Settings: 
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Public Profile Settings: 
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+Ok.
+

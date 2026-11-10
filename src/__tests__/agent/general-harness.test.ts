@@ -57,6 +57,11 @@ describe("agent/GeneralHarness", () => {
       abortSignal: new AbortController().signal,
       goalId: "goal-1",
       toolCatalog,
+      // Phase 16A.1: the harness dispatches capability-bearing tools, so the policy
+      // layer is mandatory. Production reaches the harness only through
+      // src/agent/loop.ts, which always supplies an engine; tests assemble the same
+      // context here instead of injecting it per case.
+      policyEngine: new PolicyEngine(appDb.raw, createFinancialRules(DEFAULT_TREASURY_POLICY)),
       toolContext: {
         identity,
         config: createTestConfig({ dbPath }),
@@ -154,8 +159,10 @@ describe("agent/GeneralHarness", () => {
     const aliasTool = harness.getToolDefs().find((tool) => tool.name === "web_fetch");
     const directTool = harness.getToolDefs().find((tool) => tool.name === "x402_fetch");
 
-    const aliasResult = await aliasTool!.execute({ url: "https://example.com" });
-    const directResult = await directTool!.execute({ url: "https://example.com" });
+    // An allowlisted host, so the call reaches the tool body and the returned
+    // content is what gets sanitized.
+    const aliasResult = await aliasTool!.execute({ url: "https://api.conway.tech/hostile" });
+    const directResult = await directTool!.execute({ url: "https://api.conway.tech/hostile" });
 
     for (const output of [aliasResult, directResult]) {
       expect(output).not.toContain("<|im_start|>");
@@ -165,6 +172,10 @@ describe("agent/GeneralHarness", () => {
       expect(output).toContain("[system-tag-removed]");
     }
 
+    // The context engine carries only the financial rules, so the x402 domain
+    // allowlist is still enforced by the treasury guard behind it.
+    const offAllowlist = await directTool!.execute({ url: "https://example.com" });
+    expect(offAllowlist).toContain("DOMAIN_NOT_ALLOWED");
     appDb.close();
   });
 
@@ -229,8 +240,6 @@ describe("agent/GeneralHarness", () => {
 
   it("tracks per-turn transfer count through wrapped tools so the third transfer is denied", async () => {
     const { harness, appDb } = await createHarness();
-    const policyEngine = new PolicyEngine(appDb.raw, createFinancialRules(DEFAULT_TREASURY_POLICY));
-    (harness as any).context.policyEngine = policyEngine;
 
     const transferTool = harness.getToolDefs().find((tool) => tool.name === "transfer_credits");
     expect(transferTool).toBeDefined();

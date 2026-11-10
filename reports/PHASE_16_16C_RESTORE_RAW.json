@@ -1,0 +1,77 @@
+{
+  "generatedAt": "2026-11-01T08:25:04.105Z",
+  "nodeVersion": "v22.23.4",
+  "archive": "<repo-root>\\backups\\2026-11-01_08-24-20",
+  "archiveFiles": [
+    "automaton.redacted.json",
+    "heartbeat.yml",
+    "manifest.json",
+    "state.db",
+    "state.db-shm",
+    "state.db-wal"
+  ],
+  "manifest": {
+    "present": true,
+    "entries": 3,
+    "mismatches": [],
+    "missing": []
+  },
+  "archiveIntegrity": "ok",
+  "nonEmptyArchiveTables": [
+    [
+      "schema_version",
+      10
+    ]
+  ],
+  "secretScan": {
+    "patterns": [
+      "key_field_value",
+      "pem_private_key",
+      "hex_key_context",
+      "openai_key",
+      "anthropic_key",
+      "aws_access_key"
+    ],
+    "hits": []
+  },
+  "restore": {
+    "integrity": "ok",
+    "chainValid": true,
+    "chainReason": null,
+    "schemaVersion": 13,
+    "securityEventsTable": true,
+    "securityEventsAfterWrite": 1,
+    "tablesLostOnMigration": [],
+    "tablesBefore": 41,
+    "tablesAfter": 41,
+    "location": "<os temp>/conway-15k-restore-*"
+  },
+  "livePaths": {
+    "before": {
+      "data": "absent",
+      "config": "automaton.template.json:47b7db4aeb6193e3d770f339874c33d86fc27f310a79587d98c90964a9e211ab|heartbeat.template.yml:1360e959c250844aedf7d9657ffb07df3b31c198e41a297d55007ec83aa7ace8",
+      "<repo-root>\\runtime\\home\\.automaton\\state.db": "2a8aeb3494f1507a352f591c5ef40b7320813e18796b077b01448582619efbba",
+      "C:\\Users\\<windows-user>\\.automaton\\state.db": "absent"
+    },
+    "after": {
+      "data": "absent",
+      "config": "automaton.template.json:47b7db4aeb6193e3d770f339874c33d86fc27f310a79587d98c90964a9e211ab|heartbeat.template.yml:1360e959c250844aedf7d9657ffb07df3b31c198e41a297d55007ec83aa7ace8",
+      "<repo-root>\\runtime\\home\\.automaton\\state.db": "2a8aeb3494f1507a352f591c5ef40b7320813e18796b077b01448582619efbba",
+      "C:\\Users\\<windows-user>\\.automaton\\state.db": "absent"
+    }
+  },
+  "verdicts": {
+    "manifestHashesMatch": true,
+    "archiveIntegrityOk": true,
+    "noPlaintextKeyMaterial": true,
+    "restoreIntegrityOk": true,
+    "restoredChainValid": true,
+    "restoreMigratedSchema": true,
+    "noRowsLostOnRestore": true,
+    "livePathsUntouched": true,
+    "liveDbGuardNonVacuous": true,
+    "restoreWasDisposable": true
+  },
+  "failedVerdicts": [],
+  "status": "PASS"
+}

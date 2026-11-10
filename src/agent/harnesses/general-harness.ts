@@ -1,7 +1,8 @@
 import { exec as execCb } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AutomatonTool, SpendTrackerInterface } from "../../types.js";
+import type { AutomatonTool } from "../../types.js";
+import { NOOP_SPEND_TRACKER } from "../spend-tracker.js";
 import { isProtectedFile } from "../../self-mod/code.js";
 import { BaseHarness } from "./base-harness.js";
 import type { HarnessTool } from "../harness-types.js";
@@ -47,20 +48,6 @@ const GENERAL_WRAPPED_TOOL_ALLOWLIST = new Set([
 const GENERAL_SPEC_ALIAS_TARGETS = {
   web_fetch: "x402_fetch",
 } as const;
-const NOOP_SPEND_TRACKER: SpendTrackerInterface = {
-  recordSpend: () => {},
-  getHourlySpend: () => 0,
-  getDailySpend: () => 0,
-  getTotalSpend: () => 0,
-  checkLimit: () => ({
-    allowed: true,
-    currentHourlySpend: 0,
-    currentDailySpend: 0,
-    limitHourly: Number.MAX_SAFE_INTEGER,
-    limitDaily: Number.MAX_SAFE_INTEGER,
-  }),
-  pruneOldRecords: () => 0,
-};
 
 export class GeneralHarness extends BaseHarness {
   readonly id = "general";

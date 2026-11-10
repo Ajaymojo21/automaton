@@ -1,0 +1,74 @@
+  19   ok        -  home-guard.test.ts
+  10   ok        -  phase16-audit-visibility.test.ts
+   8   ok        -  phase16-backup-roundtrip.test.ts
+   6   ok        -  phase16-emergency-stop-isolation.test.ts
+  23   ok        -  phase16-live-model-preflight.test.ts
+   8   ok        -  phase16-live-model-tier.test.ts
+  15   ok        -  phase16-package-name-hardening.test.ts
+  13   ok        -  phase16-policy-enforcement.test.ts
+  28   ok        -  phase16-self-healing-safety.test.ts
+  13   ok        -  phase16-win-shell-quoting.test.ts
+phase16+home-guard tests passed: 143
+
+by area:
+    280 passed   0 failed   0 other   11 files  src/__tests__/orchestration
+    133 passed   0 failed   0 other    6 files  src/__tests__/memory
+    124 passed   0 failed   0 other    9 files  src/__tests__/security
+    102 passed   0 failed   0 other    1 files  src/__tests__/command-injection.test.ts
+     84 passed   0 failed   0 other    1 files  src/__tests__/memory.test.ts
+     73 passed   0 failed   0 other    1 files  src/__tests__/observability.test.ts
+     72 passed   0 failed   0 other    5 files  src/__tests__/integration
+     71 passed   0 failed   0 other    1 files  src/__tests__/tools-security.test.ts
+     64 passed   0 failed   0 other    1 files  src/__tests__/inference-router.test.ts
+     62 passed   0 failed   0 other    1 files  src/__tests__/data-layer.test.ts
+     56 passed   0 failed   0 other    1 files  src/__tests__/injection-defense.test.ts
+     54 passed   0 failed   0 other    1 files  src/__tests__/phase15-penetration.test.ts
+     54 passed   0 failed   0 other    2 files  src/__tests__/inference
+     53 passed   0 failed   0 other    1 files  src/__tests__/lifecycle.test.ts
+     52 passed   0 failed   0 other    1 files  src/__tests__/social.test.ts
+     46 passed   0 failed   0 other    1 files  src/__tests__/phase15-sandbox.test.ts
+     41 passed   0 failed   0 other    1 files  src/__tests__/soul.test.ts
+     40 passed   0 failed   0 other    1 files  src/__tests__/phase15-self-healing.test.ts
+     40 passed   0 failed   0 other    1 files  src/__tests__/phase15-treasury.test.ts
+     36 passed   0 failed   0 other    1 files  src/__tests__/authority-rules.test.ts
+     31 passed   0 failed   0 other    8 files  src/__tests__/agent
+     30 passed   0 failed   0 other    1 files  src/__tests__/phase15-wallet-crypto.test.ts
+     30 passed   0 failed   0 other    1 files  src/__tests__/skills-hardening.test.ts
+     29 passed   0 failed   0 other    1 files  src/__tests__/context-hardening.test.ts
+     28 passed   0 failed   0 other    1 files  src/__tests__/http-client.test.ts
+     27 passed   0 failed   0 other    1 files  src/__tests__/path-protection.test.ts
+     26 passed   0 failed   0 other    1 files  src/__tests__/inbox-processing.test.ts
+     26 passed   0 failed   0 other    1 files  src/__tests__/phase15-incident-response.test.ts
+     26 passed   0 failed   0 other    1 files  src/__tests__/policy-engine.test.ts
+     24 passed   0 failed   0 other    1 files  src/__tests__/loop.test.ts
+     23 passed   0 failed   0 other    1 files  src/__tests__/financial.test.ts
+     20 passed   0 failed   0 other    1 files  src/__tests__/heartbeat-scheduler.test.ts
+     20 passed   0 failed   0 other    1 files  src/__tests__/low-compute.test.ts
+     20 passed   0 failed   0 other    1 files  src/__tests__/replication.test.ts
+     19 passed   0 failed   0 other    1 files  src/__tests__/heartbeat.test.ts
+     19 passed   0 failed   0 other    1 files  src/__tests__/runtime
+     17 passed   0 failed   0 other    1 files  src/__tests__/database-transactions.test.ts
+     17 passed   0 failed   0 other    1 files  src/__tests__/spend-tracker.test.ts
+     16 passed   0 failed   0 other    1 files  src/__tests__/phase15-tool-security.test.ts
+     16 passed   0 failed   0 other    1 files  src/__tests__/security-lockdown.test.ts
+     13 passed   0 failed   0 other    1 files  src/__tests__/chain.test.ts
+     12 passed   0 failed   0 other    1 files  src/__tests__/discovery-abi.test.ts
+     12 passed   0 failed   0 other    1 files  src/__tests__/discovery-data-uri.test.ts
+      7 passed   0 failed   0 other    1 files  src/__tests__/database-search-wildcard.test.ts
+      5 passed   0 failed   0 other    1 files  src/__tests__/wallet-solana.test.ts
+      4 passed   0 failed   0 other    1 files  src/__tests__/siws.test.ts
+      3 passed   0 failed   0 other    1 files  src/__tests__/funding.test.ts
+
+totals: files 82 suites 529 tests 2057 passed 2057 failed 0 pending 0
+
+slowest files:
+   100.8 s  loop.test.ts
+    20.0 s  social.test.ts
+     6.9 s  phase16-live-model-tier.test.ts
+     3.8 s  context-manager.test.ts
+     3.6 s  phase15-wallet-crypto.test.ts
+     3.1 s  heartbeat.test.ts
+     2.8 s  context-hardening.test.ts
+     2.6 s  phase15-penetration.test.ts
+
+span (first file start -> last file end): 104.1 s

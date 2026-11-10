@@ -30,6 +30,7 @@ import type {
 import {
   SCHEMA_VERSION,
   CREATE_TABLES,
+  declaredObjects,
   MIGRATION_V2,
   MIGRATION_V3,
   MIGRATION_V4,
@@ -46,7 +47,11 @@ import {
   MIGRATION_V9_ALTER_CHILDREN_ROLE,
   MIGRATION_V10,
   MIGRATION_V11,
+  MIGRATION_V12,
+  MIGRATION_V13,
+  MIGRATION_V14,
 } from "./schema.js";
+import type { DeclaredObjects } from "./schema.js";
 import type {
   RiskLevel,
   PolicyAction,
@@ -104,16 +109,10 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
   // Apply migrations
   applyMigrations(db);
 
-  // Ensure version is recorded
-  const versionRow = db
-    .prepare("SELECT MAX(version) as v FROM schema_version")
-    .get() as { v: number | null } | undefined;
-  const currentVersion = versionRow?.v ?? 0;
-  if (currentVersion < SCHEMA_VERSION) {
-    db.prepare(
-      "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
-    ).run(SCHEMA_VERSION);
-  }
+  // Verify the schema this build claims before handing the connection back. The
+  // old runner stamped the target version whenever the recorded one fell short,
+  // which could claim a schema that was never built and overwrite applied_at.
+  assertSchemaIsCurrent(db);
 
   // ─── Identity ────────────────────────────────────────────────
 
@@ -564,79 +563,357 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
   };
 }
 
-// ─── Migration Runner ───────────────────────────────────────────
+// ─── Read-only access ──────────────────────────────────────────
 
-function applyMigrations(db: DatabaseType): void {
-  const versionRow = db
-    .prepare("SELECT MAX(version) as v FROM schema_version")
-    .get() as { v: number | null } | undefined;
-  const currentVersion = versionRow?.v ?? 0;
+export type ReadOnlyDatabase = DatabaseType;
 
-  const migrations: { version: number; apply: () => void }[] = [
-    {
-      version: 2,
-      apply: () => db.exec(MIGRATION_V2),
-    },
-    {
-      version: 3,
-      apply: () => db.exec(MIGRATION_V3),
-    },
-    {
-      version: 4,
-      apply: () => {
-        db.exec(MIGRATION_V4);
-        try { db.exec(MIGRATION_V4_ALTER); } catch { logger.debug("V4 ALTER (to_address) skipped — column likely exists"); }
-        try { db.exec(MIGRATION_V4_ALTER2); } catch { logger.debug("V4 ALTER (raw_content) skipped — column likely exists"); }
-        try { db.exec(MIGRATION_V4_ALTER_INBOX_STATUS); } catch { logger.debug("V4 ALTER (inbox status) skipped — column likely exists"); }
-        try { db.exec(MIGRATION_V4_ALTER_INBOX_RETRY); } catch { logger.debug("V4 ALTER (inbox retry_count) skipped — column likely exists"); }
-        try { db.exec(MIGRATION_V4_ALTER_INBOX_MAX_RETRIES); } catch { logger.debug("V4 ALTER (inbox max_retries) skipped — column likely exists"); }
-      },
-    },
-    {
-      version: 5,
-      apply: () => db.exec(MIGRATION_V5),
-    },
-    {
-      version: 6,
-      apply: () => db.exec(MIGRATION_V6),
-    },
-    {
-      version: 7,
-      apply: () => db.exec(MIGRATION_V7),
-    },
-    {
-      version: 8,
-      apply: () => db.exec(MIGRATION_V8),
-    },
-    {
-      version: 9,
-      apply: () => {
-        db.exec(MIGRATION_V9);
-        try { db.exec(MIGRATION_V9_ALTER_CHILDREN_ROLE); } catch { /* column may already exist */ }
-      },
-    },
-    {
-      version: 10,
-      apply: () => db.exec(MIGRATION_V10),
-    },
-    {
-      version: 11,
-      apply: () => {
-        try { db.exec(MIGRATION_V11); } catch { /* column may already exist */ }
-      },
-    },
-  ];
-
-  for (const m of migrations) {
-    if (currentVersion < m.version) {
-      const migrate = db.transaction(() => {
-        m.apply();
-        db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(m.version);
-      });
-      migrate();
-    }
+/** Raised when a read-only path cannot be satisfied without writing. */
+export class ReadOnlyDatabaseError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "ReadOnlyDatabaseError";
+    if (options?.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
   }
 }
+
+/**
+ * Open an existing database for reading only.
+ *
+ * `readonly` and `fileMustExist` are the whole guarantee: SQLite will not create the
+ * file, will not write to it, and therefore cannot run the V12/V13 migrations that
+ * `createDatabase()` applies on every open. Contrast that with `createDatabase()`,
+ * which mkdirs the parent, sets WAL, creates the schema, migrates and writes a version
+ * row — a command described as "check on things" must not do any of that (F-18-01).
+ *
+ * The absence check exists so a missing database produces a message an operator can act
+ * on rather than SQLite's `unable to open database file`; `fileMustExist` is still what
+ * prevents the create.
+ *
+ * No `journal_mode` pragma is issued here — writing that pragma would defeat the point.
+ * A WAL database opened this way still gets `-wal`/`-shm` sidecars created or refreshed
+ * by SQLite itself; `state.db` is not modified.
+ *
+ * The sqlite_master probe is not decoration. Measured against junk files of 23 to 4096
+ * bytes, `new Database(path, { readonly: true })` opens every one of them without
+ * complaint: SQLite only reports `SQLITE_NOTADB` when the first statement reads the
+ * header. Without the probe this function would hand back a handle for a file that is not
+ * a database and leave the caller to discover it mid-report.
+ */
+export function openDatabaseReadOnly(dbPath: string): ReadOnlyDatabase {
+  if (!fs.existsSync(dbPath)) {
+    throw new ReadOnlyDatabaseError(
+      `No database at ${dbPath}. The read-only status path never creates one, and never migrates one. ` +
+        `If this install has not been set up yet, run the setup wizard; if its schema needs advancing, ` +
+        `run "automaton --migrate-schema" explicitly.`,
+    );
+  }
+  let db: ReadOnlyDatabase | undefined;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db.pragma("busy_timeout = 1000");
+    db.prepare("SELECT COUNT(*) AS n FROM sqlite_master").get();
+    return db;
+  } catch (error) {
+    if (db) {
+      try {
+        db.close();
+      } catch {
+        /* the failure below is the reportable one */
+      }
+    }
+    throw new ReadOnlyDatabaseError(`Cannot open ${dbPath} read-only: ${(error as Error).message}`, {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * The numbers `--status` prints, gathered without writing.
+ *
+ * Each count is the read-only equivalent of one step in the pre-A3 getter chain. The
+ * predicates match because the columns they filter on are `INTEGER NOT NULL DEFAULT 1`
+ * (`enabled`) and `TEXT NOT NULL` (`children.status`), so `= 1` and `!= 'dead'` cannot
+ * diverge from the JavaScript `!!` and `!== "dead"` they replace.
+ */
+export interface StatusSnapshot {
+  agentState: AgentState;
+  turnCount: number;
+  enabledToolCount: number;
+  enabledSkillCount: number;
+  enabledHeartbeatCount: number;
+  totalHeartbeatCount: number;
+  aliveChildCount: number;
+  totalChildCount: number;
+  registryAgentId: string | undefined;
+  schemaVersion: number;
+}
+
+function buildStatusSnapshot(db: ReadOnlyDatabase): StatusSnapshot {
+  const count = (sql: string): number => (db.prepare(sql).get() as { n: number }).n;
+  const agentStateRow = db
+    .prepare("SELECT value FROM kv WHERE key = 'agent_state'")
+    .get() as { value: string } | undefined;
+  // Same query text as getRegistryEntry(), so both pick the same row of the same scan.
+  const registryRow = db.prepare("SELECT * FROM registry LIMIT 1").get() as
+    | { agent_id: string }
+    | undefined;
+
+  return {
+    agentState: validateAgentState(agentStateRow?.value),
+    turnCount: count("SELECT COUNT(*) AS n FROM turns"),
+    enabledToolCount: count("SELECT COUNT(*) AS n FROM installed_tools WHERE enabled = 1"),
+    enabledSkillCount: count("SELECT COUNT(*) AS n FROM skills WHERE enabled = 1"),
+    enabledHeartbeatCount: count("SELECT COUNT(*) AS n FROM heartbeat_entries WHERE enabled = 1"),
+    totalHeartbeatCount: count("SELECT COUNT(*) AS n FROM heartbeat_entries"),
+    aliveChildCount: count("SELECT COUNT(*) AS n FROM children WHERE status != 'dead'"),
+    totalChildCount: count("SELECT COUNT(*) AS n FROM children"),
+    registryAgentId: registryRow?.agent_id,
+    schemaVersion: getSchemaVersion(db),
+  };
+}
+
+/** Read the status figures from `dbPath` and release the file. Never migrates. */
+export function readStatusSnapshot(dbPath: string): StatusSnapshot {
+  const db = openDatabaseReadOnly(dbPath);
+  try {
+    return buildStatusSnapshot(db);
+  } finally {
+    db.close();
+  }
+}
+
+// ─── Migration Runner ───────────────────────────────────────────
+
+/** Raised when the schema does not match what the recorded version claims. */
+export class MigrationVerificationError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "MigrationVerificationError";
+    if (options?.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
+  }
+}
+
+type AlterSite = { sql: string; table: string; column: string };
+
+type MigrationStep = {
+  version: number;
+  /** DDL applied before this version's guarded ALTERs. */
+  ddl: string;
+  /**
+   * ALTER ADD COLUMN statements, each tolerated only when the column is
+   * genuinely present afterwards. Data, not control flow: a new ALTER cannot be
+   * added without naming the column its verification checks (F-19-02).
+   */
+  alters: AlterSite[];
+};
+
+const MIGRATION_STEPS: MigrationStep[] = [
+  { version: 2, ddl: MIGRATION_V2, alters: [] },
+  { version: 3, ddl: MIGRATION_V3, alters: [] },
+  {
+    version: 4,
+    ddl: MIGRATION_V4,
+    alters: [
+      { sql: MIGRATION_V4_ALTER, table: "inbox_messages", column: "to_address" },
+      { sql: MIGRATION_V4_ALTER2, table: "inbox_messages", column: "raw_content" },
+      { sql: MIGRATION_V4_ALTER_INBOX_STATUS, table: "inbox_messages", column: "status" },
+      { sql: MIGRATION_V4_ALTER_INBOX_RETRY, table: "inbox_messages", column: "retry_count" },
+      { sql: MIGRATION_V4_ALTER_INBOX_MAX_RETRIES, table: "inbox_messages", column: "max_retries" },
+    ],
+  },
+  { version: 5, ddl: MIGRATION_V5, alters: [] },
+  { version: 6, ddl: MIGRATION_V6, alters: [] },
+  { version: 7, ddl: MIGRATION_V7, alters: [] },
+  { version: 8, ddl: MIGRATION_V8, alters: [] },
+  {
+    version: 9,
+    ddl: MIGRATION_V9,
+    alters: [{ sql: MIGRATION_V9_ALTER_CHILDREN_ROLE, table: "children", column: "role" }],
+  },
+  { version: 10, ddl: MIGRATION_V10, alters: [] },
+  { version: 11, ddl: "", alters: [{ sql: MIGRATION_V11, table: "children", column: "chain_type" }] },
+  { version: 12, ddl: MIGRATION_V12, alters: [] },
+  { version: 13, ddl: MIGRATION_V13, alters: [] },
+  { version: 14, ddl: MIGRATION_V14, alters: [] },
+];
+
+export const MIGRATION_VERSIONS: number[] = MIGRATION_STEPS.map((step) => step.version);
+
+const declaredObjectsCache = new Map<number, DeclaredObjects>();
+
+function declaredStepObjects(step: MigrationStep): DeclaredObjects {
+  const cached = declaredObjectsCache.get(step.version);
+  if (cached) return cached;
+  const derived = declaredObjects([step.ddl, ...step.alters.map((a) => a.sql)].join("\n"));
+  declaredObjectsCache.set(step.version, derived);
+  return derived;
+}
+
+export function getSchemaVersion(db: DatabaseType): number {
+  const row = db
+    .prepare("SELECT MAX(version) as v FROM schema_version")
+    .get() as { v: number | null } | undefined;
+  return row?.v ?? 0;
+}
+
+/**
+ * True only for a real duplicate-column SqliteError. SQLite gives the same
+ * generic SQLITE_ERROR code to duplicate-column, missing-table and syntax errors,
+ * so the message is the only thing that separates them — and a plain Error or a
+ * bare object carrying the same text is not accepted.
+ */
+export function isDuplicateColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name !== "SqliteError") return false;
+  return /^duplicate column name: /i.test(error.message);
+}
+
+function hasColumn(db: DatabaseType, table: string, column: string): boolean {
+  return !!db
+    .prepare("SELECT 1 AS ok FROM pragma_table_info(?) WHERE name = ?")
+    .get(table, column);
+}
+
+/**
+ * Apply one ALTER ADD COLUMN. The single tolerated failure is that the column is
+ * already there, and that tolerance is confirmed by reading the schema back rather
+ * than by trusting the catch site: a lock, disk, syntax or constraint error
+ * rethrows and rolls back the enclosing transaction, so no version is recorded.
+ */
+export function applyAlterToleratingExistingColumn(
+  db: DatabaseType,
+  sql: string,
+  table: string,
+  column: string,
+): void {
+  try {
+    db.exec(sql);
+    return;
+  } catch (error) {
+    if (!isDuplicateColumnError(error)) {
+      logger.error(
+        "Migration ALTER failed for a reason other than a duplicate column",
+        error instanceof Error ? error : undefined,
+        { table, column },
+      );
+      throw error;
+    }
+    if (!hasColumn(db, table, column)) {
+      throw new MigrationVerificationError(
+        "ALTER reported " + table + "." + column + " as already present, but the column is absent",
+        { cause: error },
+      );
+    }
+    logger.info("Migration ALTER skipped, column verified present", { table, column });
+  }
+}
+
+function missingStepObjects(db: DatabaseType, step: MigrationStep): string[] {
+  const declared = declaredStepObjects(step);
+  const named = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = ? AND name = ?");
+  const missing: string[] = [];
+  for (const table of declared.tables) if (!named.get("table", table)) missing.push("table " + table);
+  for (const index of declared.indexes) if (!named.get("index", index)) missing.push("index " + index);
+  for (const trigger of declared.triggers) if (!named.get("trigger", trigger)) missing.push("trigger " + trigger);
+  for (const column of declared.columns) {
+    if (!hasColumn(db, column.table, column.column)) {
+      missing.push(column.table + "." + column.column);
+    }
+  }
+  return missing;
+}
+
+/** Throws, naming every object this version declares that the database lacks. */
+export function assertVersionObjectsExist(db: DatabaseType, version: number): void {
+  const step = MIGRATION_STEPS.find((candidate) => candidate.version === version);
+  if (!step) {
+    throw new MigrationVerificationError("no migration step is declared for schema version " + version);
+  }
+  const missing = missingStepObjects(db, step);
+  if (missing.length > 0) {
+    throw new MigrationVerificationError(
+      "schema version " +
+        version +
+        " is missing " +
+        missing.length +
+        " object(s) its own DDL declares: " +
+        missing.join(", "),
+    );
+  }
+}
+
+/**
+ * The plan must cover 2..SCHEMA_VERSION with no gap. This replaces the old blind
+ * stamp: a version with no migration now fails at startup instead of being
+ * written into schema_version as though it had been applied.
+ */
+function assertMigrationPlanIsComplete(): void {
+  const expected = Array.from({ length: SCHEMA_VERSION - 1 }, (_, index) => index + 2);
+  if (
+    MIGRATION_VERSIONS.length !== expected.length ||
+    MIGRATION_VERSIONS.some((version, index) => version !== expected[index])
+  ) {
+    throw new MigrationVerificationError(
+      "migration plan covers [" +
+        MIGRATION_VERSIONS.join(", ") +
+        "] but this build declares 2.." +
+        SCHEMA_VERSION,
+    );
+  }
+}
+
+function recordSchemaVersion(db: DatabaseType, version: number): void {
+  // DO NOTHING rather than OR REPLACE: a genuine applied_at is never overwritten.
+  db.prepare(
+    "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO NOTHING",
+  ).run(version);
+}
+
+function applyMigrationStep(db: DatabaseType, step: MigrationStep): void {
+  if (step.ddl.trim().length > 0) db.exec(step.ddl);
+  for (const alter of step.alters) {
+    applyAlterToleratingExistingColumn(db, alter.sql, alter.table, alter.column);
+  }
+}
+
+export function applyMigrations(db: DatabaseType): void {
+  assertMigrationPlanIsComplete();
+
+  const currentVersion = getSchemaVersion(db);
+  for (const step of MIGRATION_STEPS) {
+    if (currentVersion >= step.version) continue;
+
+    // One transaction per version: DDL, verification and the version row all
+    // happen, or none of them do.
+    const migrate = db.transaction(() => {
+      applyMigrationStep(db, step);
+      assertVersionObjectsExist(db, step.version);
+      recordSchemaVersion(db, step.version);
+    });
+    migrate();
+  }
+}
+
+/**
+ * Fail closed unless the recorded version is the version this build declares and
+ * every migration's declared objects are present.
+ */
+export function assertSchemaIsCurrent(db: DatabaseType): void {
+  const recorded = getSchemaVersion(db);
+  if (recorded !== SCHEMA_VERSION) {
+    throw new MigrationVerificationError(
+      "schema_version records " +
+        recorded +
+        " but this build declares " +
+        SCHEMA_VERSION +
+        " and the migration plan did not raise it",
+    );
+  }
+  for (const step of MIGRATION_STEPS) {
+    assertVersionObjectsExist(db, step.version);
+  }
+}
+
 
 // ─── Exported Helpers ───────────────────────────────────────────
 

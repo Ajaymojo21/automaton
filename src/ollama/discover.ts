@@ -9,6 +9,7 @@ import type BetterSqlite3 from "better-sqlite3";
 import { modelRegistryUpsert, modelRegistryGet } from "../state/database.js";
 import type { ModelRegistryRow } from "../types.js";
 import { createLogger } from "../observability/logger.js";
+import { validateEndpointUrl, assertEndpointResolvesSafely } from "../security/url-guard.js";
 
 const logger = createLogger("ollama");
 
@@ -41,9 +42,22 @@ export async function discoverOllamaModels(
 ): Promise<string[]> {
   const url = `${baseUrl.replace(/\/$/, "")}/api/tags`;
 
+  // B-9: the Ollama base URL is operator-set, so it is validated and resolved here,
+  // immediately before the request, not only where it was loaded.
+  const guard = validateEndpointUrl(baseUrl, "ollama");
+  if (!guard.ok || !guard.policy) {
+    logger.warn(`Ollama endpoint rejected by URL guard: ${guard.reason}`);
+    return [];
+  }
+  const resolved = await assertEndpointResolvesSafely(guard.policy);
+  if (!resolved.ok) {
+    logger.warn(`Ollama endpoint failed DNS safety check: ${resolved.reason}`);
+    return [];
+  }
+
   let data: OllamaTagsResponse;
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5_000), redirect: "error" });
     if (!resp.ok) {
       logger.warn(`Ollama /api/tags returned ${resp.status} — skipping discovery`);
       return [];

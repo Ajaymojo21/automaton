@@ -1,0 +1,135 @@
+observedAt 2026-11-01T09:35:19.008Z
+
+######## overview — Overview
+  [VERIFIED] Runtime home: "<repo-root>\\runtime\\home"  // expected <repo-root>\runtime\home
+  [VERIFIED] Agent activation: false  // security.activationApproved is not true in automaton.json
+  [VERIFIED] Emergency stop: "NOT ENGAGED"  // union scan of 2 candidate paths found no marker; audit trail NOT VERIFIED separately
+  [VERIFIED] Wallet: "NO WALLET CONFIGURED"
+  [VERIFIED] Self-healing: false  // false (code default — not declared in automaton.json)
+  [VERIFIED] Health: "critical"
+  [VERIFIED] Live database: "<repo-root>\\runtime\\home\\.automaton\\state.db"  // integrity ok, journal wal
+  [VERIFIED] Schema: "live 11 < code 13"  // V12/V13 migrations are not applied; their four tables are absent, so those readers are NOT VERIFIED rather than FAIL
+  [UNKNOWN] Agent runtime state: undefined  // UNKNOWN — never started. db.getAgentState() would return the code default 'setup'; that is a default, not an observation, so it is not displayed.
+  [VERIFIED] Conway process: "UNKNOWN"  // 27 node.exe process(es) visible; tasklist reports image names only, so none can be identified as the Conway runtime. The dashboard's own memory usage 
+  [EMPTY] Activity logs: 0  // NO DATA — the runtime has never been launched from this console
+  [NOT VERIFIED] Config as behaviour: undefined  // DECLARED AT REST — nothing here proves a running process read it. The agent is inactive by design.
+  NOTICE(info) Controls disabled: the agent is inactive by design. This console reads; it does not start, fund, migrate, seal, engage or repair.…
+
+######## agent — AI Agent
+  [UNKNOWN] Agent state: undefined  // UNKNOWN — never started. db.getAgentState() would return the code default 'setup'; that is a default, not an observation, so it is not displayed.
+  [UNKNOWN] Turn count: undefined  // key absent — the agent has never taken a turn
+  [EMPTY] kv keys: 0  // 0 keys — nothing has ever been written
+  [EMPTY] Soul / persona: false  // EMPTY — no SOUL.md at either path and soul_history has 0 rows
+  TABLE Persistence :: table|verdict|rows|note (24 rows)
+     ["kv","EMPTY",0,"exists, 0 rows"]
+     ["registry","EMPTY",0,"exists, 0 rows"]
+     ["children","EMPTY",0,"exists, 0 rows"]
+  NOTICE(warn) No agent control is reachable from this area. START would set CONWAY_ACTIVATION=APPROVED and call run(), which spawns a process, e…
+
+######## models — AI Models
+  [NOT VERIFIED] Declared model: undefined  // declared "gpt-5.2" — declared, never invoked. No inference call has run, so the model actually in use is UNKNOWN.
+  [EMPTY] model_registry: 0  // table "model_registry" exists and contains 0 rows
+  [EMPTY] inference_costs: 0  // table "inference_costs" exists and contains 0 rows
+  [UNKNOWN] Provider latency: undefined  // NOT VERIFIED — no inference has run, so there is no latency to report
+  [UNKNOWN] Token cost today: undefined  // NOT VERIFIED — table empty; 0 would be a real number only after a call
+  TABLE Credential gates (presence only — values are never read out) :: field|configured|source (3 rows)
+     ["conwayApiKey","not configured","automaton.json conwayApiKey / env CONWAY_API_KEY"]
+     ["openaiApiKey","not configured","automaton.json openaiApiKey / env OPENAI_API_KEY"]
+     ["anthropicApiKey","not configured","automaton.json anthropicApiKey / env ANTHROPIC_API_KEY"]
+  NOTICE(info) LIVE MODEL TESTING = PENDING CREDENTIAL APPROVAL. Phase 16D delivered the preflight and the isolated tier; it did not run a live m…
+
+######## wallet — Wallet
+  [VERIFIED] Wallet: "NO WALLET CONFIGURED"
+  [UNKNOWN] Address: undefined  // no wallet — an address cannot exist
+  [VERIFIED] Chain type: "UNKNOWN (no wallet)"  // getWalletChainType() returns "evm" as a default when no wallet exists, which is indistinguishable from a real EVM wallet, so the dashboard does not ca
+  [VERIFIED] wallet.json: "absent"  // existence=false is itself a verified observation
+  [VERIFIED] Path agreement: true  // both derivations of the wallet path agree
+  [UNKNOWN] Balance / USD: undefined  // UNKNOWN — wallet not provisioned; no network path is configured and none is opened
+  [EMPTY] On-chain transactions: 0  // table "onchain_transactions" exists and contains 0 rows
+  [EMPTY] Local transactions: 0  // table "transactions" exists and contains 0 rows
+  LIST Prohibitions in force: Wallet creation, Funding, Private key / seed phrase / passphrase, Passphrase env gate
+
+######## treasury — Treasury
+  TABLE Policy — declared versus effective :: key|declared in automaton.json|effective value|source (13 rows)
+     ["agentBudgetCents","no","200000","code default"]
+     ["childBudgetCents","no","50000","code default"]
+     ["maxDailyTransferCents","yes","0","automaton.json"]
+  [VERIFIED] Lockdown: true  // the gate that denies every tool not explicitly allowed
+  [VERIFIED] Allowed tools: 0  // an empty list is the intended posture, not a gap
+  [NOT VERIFIED] Authorization ledger: undefined  // table absent (V12) — getTreasuryGuard() throws, so reserved/committed totals cannot be read
+  [EMPTY] Spend tracking: 0  // table "spend_tracking" exists and contains 0 rows
+  [EMPTY] Policy decisions: 0  // table "policy_decisions" exists and contains 0 rows
+  NOTICE(danger) TreasuryGuard.authorize/commit/release, wallet funding and blockchain transactions are not reachable. They are writes against live…
+
+######## security — Security Center
+  [VERIFIED] Marker scan: "NOT ENGAGED"  // union scan of 2 paths, none holding a marker. This is a scan result, not a guarantee: engage/clear are not reachable from this console.
+  [VERIFIED] Paths scanned: ["<repo-root>\\runtime\\home\\.automaton\\EMERGENCY_STOP","C:\\Users\\<windows-user>\\  // rendered so the operator can see the union, which follows ambient HOME
+  [NOT VERIFIED] Audit-trail corroboration: undefined  // table absent (V12) — the second source of truth does not exist, so the marker scan is the only signal
+  TABLE Activation gates :: gate|state|verdict (5 rows)
+     ["security.activationApproved","false","VERIFIED (file)"]
+     ["CONWAY_ACTIVATION","absent","VERIFIED (this process)"]
+     ["CONWAY_ALLOW_WALLET_CREATION","absent","VERIFIED (this process)"]
+  [NOT VERIFIED] Audit seals: undefined  // table absent — cannot verify seals. ⛔ This must never render as "seals failed": an absent table is not a failed seal.
+  [NOT VERIFIED] Incidents: undefined  // table absent (V13) — listIncidents/incidentSummary throw. NOT VERIFIED, not "no incidents".
+  [UNKNOWN] File ACLs: undefined  // NOT VERIFIED — the dashboard does not shell out for ACLs; re-run SECURITY_AUDIT.bat to collect them
+  LIST Configuration integrity: automaton.json, Live database, Imported API contract
+
+######## health — Health Monitor
+  [VERIFIED] Overall: "critical"  // generatedAt 2026-11-01T09:35:19.011Z
+  [VERIFIED] Report freshness: "<repo-root>\\reports\\health-latest.json (1327 min old, sha256 …)"  // the persisted file is written by HEALTH_CHECK.bat, not by this console — its staleness is reported, not repaired
+  TABLE Checks :: id|status|message|evidence (8 rows)
+     ["emergency_stop","pass","Not engaged","—"]
+     ["database_integrity","pass","quick_check ok","—"]
+     ["schema_version","warn","schema 11 is older than 13; migrations run on next open","{\"version\":11,\"expected\":13}"]
+  [VERIFIED] CPU utilisation: "18.3 %"  // os.loadavg() returns [0,0,0] on Windows and is not used
+  [VERIFIED] Memory used: "54 %"  // 18377224192 of 34053414912 bytes
+  [VERIFIED] Disk (state volume): "233491816448 free of 510146899968"
+  [VERIFIED] Node runtime: "v22.23.4 on win32 x64"
+  [VERIFIED] Dashboard process: 20020  // this is the console's own process, never presented as the agent's
+
+######## self-healing — Self-Healing
+  [VERIFIED] selfHealingEnabled: false  // false — the key is ABSENT from automaton.json; the value is a code default the operator never declared
+  [VERIFIED] Mechanic: "NOT REACHABLE"  // runMechanic() performs repairs (may restart tasks and write). §16A.4 requires the mechanic never to touch wallet credentials, treasury limits, securit
+  [VERIFIED] Declared entries (heartbeat.yml): "6 declared, 3 enabled in YAML, 0 in the database"  // declared ≠ scheduled. syncHeartbeatToDb() has never run against this database.
+  [EMPTY] heartbeat_schedule rows: 0  // table "heartbeat_schedule" exists and contains 0 rows
+  [EMPTY] heartbeat_history rows: 0  // table "heartbeat_history" exists and contains 0 rows
+  [VERIFIED] Next runs: "NEVER RUN — 0 scheduled, 0 executed"  // syncHeartbeatToDb() never ran; it is a write and the dashboard does not write. Not "all green".
+  NOTICE(info) Self-healing stays disabled by default (mandate §17 "Keep: selfHealingEnabled = false"). Enabling it is a §29 item 14 decision — u…
+
+######## logs — Activity Logs
+  TABLE Agent logs :: file|bytes|modified (1 rows)
+     ["—","NO DATA","the runtime has never been launched"]
+  [EMPTY] PID file: "absent"  // no pid file — consistent with an agent that has never run
+  [UNKNOWN] Activity timeline: undefined  // table exists and holds 0 rows; an empty timeline is not a gap-free timeline
+  [VERIFIED] Audit log: "1 file(s) in <repo-root>\\dashboard\\logs"  // append-only JSONL, values redacted structurally before write
+
+######## backup — Backup & Recovery
+  TABLE Database backups :: directory|kind|bytes|modified|verification (2 rows)
+     ["2026-11-01_08-24-20","directory","—","2026-11-01T08:24:49.576Z","UNVERIFIED — use Verify to re-hash against its manifest (read-only)"]
+     ["2026-10-31_10-27-31","directory","—","2026-10-31T10:27:31.911Z","UNVERIFIED — use Verify to re-hash against its manifest (read-only)"]
+  [VERIFIED] Live database: "integrity_check = ok"
+  [VERIFIED] Backup count: 10  // 2 database backup(s), 8 source snapshot(s)
+  [UNKNOWN] Manifest hashes recomputed: undefined  // NOT VERIFIED in this view — hashing every archive on each poll would make the panel slow; press Verify
+  NOTICE(danger) Restore is available only as a copy to an alternate path, behind a typed confirmation, and never against the live state directory.…
+
+######## controls — System Controls
+  NOTICE(warn) START / STOP / RESTART / ACTIVATE / CREATE WALLET / FUND / ENABLE FINANCIAL TOOLS / ENABLE REPLICATION / ENABLE SELF-HEALING / ENG…
+  TABLE Safe actions that are wired :: action|what it runs|writes (2 rows)
+     ["Run health check","the pinned runtime executing src/reliability/health-guardian.ts over a read-only handle","reports/dashboard-health-*.json (new file, never an existin
+     ["Verify backups","re-hash archive files against their own manifests","nothing outside the audit log"]
+  TABLE Gate board :: invariant|required|observed|verdict (9 rows)
+     ["activationApproved","false","false","VERIFIED — automaton.json security"]
+     ["CONWAY_ACTIVATION","absent","absent","VERIFIED — process environment of the dashboard"]
+     ["lockdown","true","true","VERIFIED — automaton.json security"]
+
+######## settings — Settings
+  LIST Endpoints: Bind address, Allowed origin, Database, State directory, Config file
+  TABLE Configuration keys :: key|state (4 rows)
+     ["conwayApiKey","not configured"]
+     ["openaiApiKey","not configured"]
+     ["anthropicApiKey","not configured"]
+  TABLE Security block — declared versus code default :: key|declared|effective|source (15 rows)
+     ["activationApproved","yes","false","automaton.json"]
+     ["allowExternalExposure","yes","false","automaton.json"]
+     ["allowFinancialTools","yes","false","automaton.json"]
+  LIST Write paths that are not exposed: saveConfig / createConfig, syncHeartbeatToDb, applyMigrations (V12/V13), Dashboard settings file

@@ -5,7 +5,7 @@
  * Tools are organized by category and exposed to the inference model.
  */
 
-import nodePath from "node:path";
+import { createHash } from "node:crypto";
 import { ulid } from "ulid";
 import type {
   AutomatonTool,
@@ -22,32 +22,55 @@ import type {
 import type { PolicyEngine } from "./policy-engine.js";
 import { sanitizeToolResult, sanitizeInput } from "./injection-defense.js";
 import { createLogger } from "../observability/logger.js";
+import { isValidPackageName } from "./policy-rules/validation.js";
+import { quoteShellArg } from "../security/shell-quote.js";
+import {
+  getTreasuryGuard,
+  resolveTreasuryIntent,
+  resolveTreasuryPolicy,
+} from "../security/treasury-guard.js";
+import { authorizeToolCall } from "../security/tool-authorizer.js";
+import { checkPolicyEnforcement, policyLayerSkipped } from "../security/policy-enforcement.js";
+import { tryAppendSecurityEvent } from "../security/audit-chain.js";
+import { isEmergencyStopActive } from "../security/emergency-stop.js";
+import {
+  confineToRoot,
+  isProtectedPath,
+  resolveSandboxRoot,
+  validateShellCommand,
+} from "../security/sandbox.js";
+import type { AutomatonConfig } from "../types.js";
 
 const logger = createLogger("tools");
 
 // ─── Path Confinement ─────────────────────────────────────────
-// write_file is restricted to the sandbox home directory tree.
-// The sandbox home is /root for both local and remote execution.
-const SANDBOX_HOME = "/root";
+// Filesystem tools are confined to the sandbox root. On a remote sandbox that
+// is /root; locally it is the configured sandboxRoot or HOME. Paths that land in
+// protected locations (user documents, browser profiles, other agent configs,
+// wallets) are refused even when they fall inside the root.
 
 /**
- * Validate that a file path resolves to within the allowed root directory.
+ * Resolve a user-supplied path against the sandbox root and refuse escapes.
  * Returns the resolved absolute path, or an error string if out of bounds.
  */
-function confinePathToSandbox(filePath: string): string | { error: string } {
-  // Resolve ~ to SANDBOX_HOME
-  const expanded = filePath.startsWith("~")
-    ? nodePath.join(SANDBOX_HOME, filePath.slice(1))
-    : filePath;
-  // Resolve to absolute (relative paths resolve against SANDBOX_HOME)
-  const resolved = nodePath.resolve(SANDBOX_HOME, expanded);
-  // Ensure the resolved path is within the sandbox home
-  if (resolved !== SANDBOX_HOME && !resolved.startsWith(SANDBOX_HOME + "/")) {
+function confinePathToSandbox(
+  filePath: string,
+  config: AutomatonConfig,
+  sandboxId: string | undefined,
+): string | { error: string } {
+  const root = resolveSandboxRoot(config, sandboxId);
+  const confined = confineToRoot(filePath, root);
+  if (!confined.ok || !confined.path) {
     return {
-      error: `Blocked: write_file path "${filePath}" resolves to "${resolved}" which is outside the allowed directory (${SANDBOX_HOME}). Writes are confined to the sandbox home.`,
+      error: `Blocked: path "${filePath}" is not permitted (${confined.error ?? "outside sandbox"}). Files are confined to ${root}.`,
     };
   }
-  return resolved;
+  if (isProtectedPath(confined.path)) {
+    return {
+      error: "Blocked: path resolves inside a protected location. This protects credentials, user documents and other agent configurations.",
+    };
+  }
+  return confined.path;
 }
 
 // Tools whose results come from external sources and need sanitization
@@ -133,6 +156,10 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
       execute: async (args, ctx) => {
         const command = args.command as string;
+        if (ctx.config.security?.sandboxEnabled !== false) {
+          const denied = validateShellCommand(command);
+          if (denied) return denied;
+        }
         const forbidden = isForbiddenCommand(command, ctx.identity.sandboxId);
         if (forbidden) return forbidden;
 
@@ -158,8 +185,12 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
       execute: async (args, ctx) => {
         const filePath = args.path as string;
-        // Path confinement: restrict writes to sandbox home directory
-        const confined = confinePathToSandbox(filePath);
+        // Path confinement: restrict writes to the sandbox root
+        const confined = confinePathToSandbox(
+          filePath,
+          ctx.config,
+          ctx.identity.sandboxId,
+        );
         if (typeof confined === "object") return confined.error;
         // Guard against overwriting protected files (same check as edit_own_file)
         const { isProtectedFile } = await import("../self-mod/code.js");
@@ -185,7 +216,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       execute: async (args, ctx) => {
         const filePath = args.path as string;
         // Block reads of sensitive files (wallet, env, config secrets)
-        const basename = filePath.split("/").pop() || "";
+        const basename = filePath.split(/[\\/]/).pop() || "";
         const sensitiveFiles = ["wallet.json", ".env", "automaton.json"];
         const sensitiveExtensions = [".key", ".pem"];
         if (
@@ -195,12 +226,21 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         ) {
           return "Blocked: Cannot read sensitive file. This protects credentials and secrets.";
         }
+        // Path confinement: reads are limited to the sandbox root
+        const confined = confinePathToSandbox(
+          filePath,
+          ctx.config,
+          ctx.identity.sandboxId,
+        );
+        if (typeof confined === "object") return confined.error;
         try {
-          return await ctx.conway.readFile(filePath);
+          return await ctx.conway.readFile(confined);
         } catch {
           // Conway files/read API may be broken — fall back to exec(cat)
+          const quoted = quoteShellArg(confined);
+          if (!quoted.ok) return `Blocked: ${quoted.reason}`;
           const result = await ctx.conway.exec(
-            `cat ${escapeShellArg(filePath)}`,
+            `cat ${quoted.value}`,
             30_000,
           );
           if (result.exitCode !== 0) {
@@ -564,8 +604,9 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       execute: async (args, ctx) => {
         const pkg = args.package as string;
         // Defense-in-depth: validate package name inline in case the
-        // policy engine's validate.package_name rule is bypassed.
-        if (!/^[@a-zA-Z0-9._\/-]+$/.test(pkg)) {
+        // policy engine's validate.package_name rule is bypassed. One source of
+        // truth so the two layers cannot drift apart.
+        if (!isValidPackageName(pkg)) {
           return `Blocked: invalid package name "${pkg}"`;
         }
         const result = await ctx.conway.exec(`npm install -g ${pkg}`, 60000);
@@ -960,8 +1001,9 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const pkg = args.package as string;
         // Defense-in-depth: validate package name inline in case the
-        // policy engine's validate.package_name rule is bypassed.
-        if (!/^[@a-zA-Z0-9._\/-]+$/.test(pkg)) {
+        // policy engine's validate.package_name rule is bypassed. One source of
+        // truth so the two layers cannot drift apart.
+        if (!isValidPackageName(pkg)) {
           return `Blocked: invalid package name "${pkg}"`;
         }
         const result = await ctx.conway.exec(`npm install -g ${pkg}`, 60000);
@@ -1662,13 +1704,37 @@ Model: ${ctx.inference.getDefaultModel()}
             if (cooldownOk) {
               ctx.db.setKV("last_sandbox_topup_attempt", new Date().toISOString());
               const { topupForSandbox } = await import("../conway/topup.js");
+              const guard = getTreasuryGuard(ctx);
+              let topupAuthorizationId: string | null = null;
+              const minuteBucket = Math.floor(Date.now() / 60_000);
               const topup = await topupForSandbox({
                 apiUrl: ctx.config.conwayApiUrl,
                 account: ctx.identity.account,
                 error: err,
                 chainType: ctx.config.chainType || ctx.identity.chainType || "evm",
+                authorize: (amountCents) => {
+                  try {
+                    const decision = guard.authorize({
+                      operation: "credit_purchase",
+                      toolName: "spawn_child:auto_topup",
+                      amountCents,
+                      idempotencyKey: `auto-topup:${ctx.identity.address}:${minuteBucket}`,
+                      actor: ctx.identity.address,
+                    });
+                    if (decision.allowed) topupAuthorizationId = decision.authorizationId;
+                    return {
+                      allowed: decision.allowed,
+                      reason: decision.message,
+                    };
+                  } catch {
+                    return { allowed: false, reason: "treasury unavailable" };
+                  }
+                },
               });
               if (topup?.success) {
+                if (typeof topupAuthorizationId === "string") {
+                  try { guard.commit(topupAuthorizationId); } catch { /* audit best effort */ }
+                }
                 const retryLifecycle = new ChildLifecycle(ctx.db.raw);
                 const retryGenesis = generateGenesisConfig(ctx.identity, ctx.config, {
                   name: args.name as string,
@@ -1682,6 +1748,8 @@ Model: ${ctx.inference.getDefaultModel()}
                   retryGenesis,
                   retryLifecycle,
                 );
+              } else if (typeof topupAuthorizationId === "string") {
+                try { guard.release(topupAuthorizationId, "auto_topup_failed"); } catch { /* audit best effort */ }
               }
             }
           }
@@ -2768,7 +2836,7 @@ Model: ${ctx.inference.getDefaultModel()}
           : undefined;
 
         const maxPayment =
-          ctx.config.treasuryPolicy?.maxX402PaymentCents ??
+          resolveTreasuryPolicy(ctx.config).maxX402PaymentCents ??
           DEFAULT_TREASURY_POLICY.maxX402PaymentCents;
         const result = await x402Fetch(
           url,
@@ -3260,8 +3328,12 @@ function createInstalledToolExecutor(tool: {
     // Generic installed tool — execute via sandbox shell if command is configured
     const command = tool.config?.command as string | undefined;
     if (command) {
+      const quoted = quoteShellArg(JSON.stringify(args));
+      if (!quoted.ok) {
+        return `Blocked: arguments for ${tool.name} cannot be passed to the host shell. ${quoted.reason}`;
+      }
       const result = await ctx.conway.exec(
-        `${command} ${escapeShellArg(JSON.stringify(args))}`,
+        `${command} ${quoted.value}`,
         30000,
       );
       return `exit_code: ${result.exitCode}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`;
@@ -3287,8 +3359,50 @@ export function toolsToInferenceFormat(
 }
 
 /**
+ * Deterministic key for duplicate detection. Identical financial calls inside
+ * the same turn share a key and the second one is rejected as a replay.
+ */
+function treasuryIdempotencyKey(
+  toolName: string,
+  args: Record<string, unknown>,
+  turnId?: string,
+): string {
+  if (!turnId) return ulid();
+  const digest = createHash("sha256")
+    .update(`${toolName}:${JSON.stringify(args)}:${turnId}`, "utf-8")
+    .digest("hex");
+  return `turn:${turnId}:${digest.slice(0, 32)}`;
+}
+
+/**
+ * Financial tools report failure as text rather than by throwing. Reservations
+ * are released on these results and committed otherwise. Unmatched failures
+ * over-count budget, which fails closed.
+ */
+function isFinancialFailure(result: string): boolean {
+  const markers = [
+    "Blocked:",
+    "Insufficient",
+    "Invalid tier",
+    "Credit topup failed",
+    "x402 fetch failed",
+    "Child ",
+    "Transfer failed",
+  ];
+  return markers.some((marker) => result.startsWith(marker));
+}
+
+/**
  * Execute a tool call and return the result.
- * Optionally evaluates against the policy engine before execution.
+ *
+ * Gate order, all of it unavoidable: emergency stop → tool authorizer (deny by default) →
+ * policy-layer presence check → policy evaluation → centralized treasury guard → timeout
+ * and output bounds → result sanitisation. The policy engine is no longer optional for any
+ * tool that carries a money, shell, replication, publishing or administrative capability
+ * (Phase 16A.1); omitting the argument is now a denial, not a skip.
+ *
+ * Financial tools additionally pass through the treasury guard, which runs even when no
+ * policy engine or turn context is supplied.
  */
 export async function executeTool(
   toolName: string,
@@ -3300,6 +3414,7 @@ export async function executeTool(
     inputSource: InputSource | undefined;
     turnToolCallCount: number;
     sessionSpend: SpendTrackerInterface;
+    turnId?: string;
   },
 ): Promise<ToolCallResult> {
   const tool = tools.find((t) => t.name === toolName);
@@ -3316,7 +3431,96 @@ export async function executeTool(
     };
   }
 
-  // Policy evaluation (if engine is provided)
+  // Emergency stop halts all tool execution, regardless of permissions or
+  // policy. It is checked here so a denial cannot be bypassed by an in-process
+  // dispatch that skips the heartbeat daemon.
+  if (isEmergencyStopActive(context.db?.raw)) {
+    if (context.db?.raw) {
+      tryAppendSecurityEvent(
+        context.db.raw,
+        {
+          severity: "HIGH",
+          category: "tool",
+          eventType: "tool.denied",
+          actor: context.identity?.address ?? null,
+          details: { tool: toolName, reasonCode: "EMERGENCY_STOP" },
+        },
+      );
+    }
+    return {
+      id: ulid(),
+      name: toolName,
+      arguments: args,
+      result: "",
+      durationMs: Date.now() - startTime,
+      error: "Tool blocked: emergency stop is engaged",
+    };
+  }
+
+  // Centralized tool authorization — deny by default, independent of prompts
+  // and of the policy engine. Every decision is written to the audit chain.
+  const authorization = authorizeToolCall(tool, context.config, {
+    actor: context.identity?.address,
+    args,
+    db: context.db?.raw,
+  });
+  if (!authorization.allowed) {
+    return {
+      id: ulid(),
+      name: toolName,
+      arguments: args,
+      result: "",
+      durationMs: Date.now() - startTime,
+      error: `Tool denied: ${authorization.reasonCode} — ${authorization.message}`,
+    };
+  }
+
+  // Phase 16A.1: the policy layer is not skippable by omitting an argument. A tool that
+  // carries money, shell, replication, publishing or administrative capability is denied
+  // outright when the engine or the turn context is missing, and the denial is audited.
+  const policyPresence = {
+    hasEngine: Boolean(policyEngine),
+    hasTurnContext: Boolean(turnContext),
+  };
+  const enforcement = checkPolicyEnforcement(authorization.capabilities, policyPresence);
+  if (!enforcement.enforced) {
+    if (context.db?.raw) {
+      tryAppendSecurityEvent(context.db.raw, {
+        severity: "HIGH",
+        category: "tool",
+        eventType: "tool.denied",
+        actor: context.identity?.address ?? null,
+        details: {
+          tool: toolName,
+          reasonCode: enforcement.reasonCode,
+          capabilities: enforcement.triggers,
+        },
+      });
+    }
+    return {
+      id: ulid(),
+      name: toolName,
+      arguments: args,
+      result: "",
+      durationMs: Date.now() - startTime,
+      error: `Policy denied: ${enforcement.reasonCode} — ${enforcement.message}`,
+    };
+  }
+
+  // Where the policy layer legitimately does not run, the omission is recorded instead of
+  // silent: "no policy evaluated" must be visible in the audit chain, not inferred later.
+  if (policyLayerSkipped(policyPresence) && context.db?.raw) {
+    tryAppendSecurityEvent(context.db.raw, {
+      severity: "LOW",
+      category: "policy",
+      eventType: "policy.skipped",
+      actor: context.identity?.address ?? null,
+      details: { tool: toolName, capabilities: authorization.capabilities },
+    });
+  }
+
+  // Policy evaluation (engine and turn context are both present whenever the tool carries
+  // a policy-required capability; a non-required tool may still arrive without them).
   if (policyEngine && turnContext) {
     const request: PolicyRequest = {
       tool,
@@ -3339,12 +3543,105 @@ export async function executeTool(
     }
   }
 
+  // Centralized treasury authorization (independent of the policy engine).
+  let treasuryAuthorizationId: string | null = null;
+  const treasuryIntent = resolveTreasuryIntent(
+    toolName,
+    args,
+    resolveTreasuryPolicy(context.config),
+  );
+
+  if (treasuryIntent.kind === "invalid") {
+    return {
+      id: ulid(),
+      name: toolName,
+      arguments: args,
+      result: "",
+      durationMs: Date.now() - startTime,
+      error: `Treasury denied: ${treasuryIntent.reasonCode} — ${treasuryIntent.message}`,
+    };
+  }
+
+  if (treasuryIntent.kind === "financial") {
+    const needsBalance =
+      treasuryIntent.intent.operation === "transfer_out" ||
+      treasuryIntent.intent.operation === "child_funding";
+    try {
+      const balanceCents = needsBalance
+        ? await context.conway.getCreditsBalance()
+        : undefined;
+      const decision = getTreasuryGuard(context).authorize({
+        ...treasuryIntent.intent,
+        toolName,
+        balanceCents,
+        idempotencyKey: treasuryIdempotencyKey(toolName, args, turnContext?.turnId),
+        actor: context.identity?.address,
+      });
+      if (!decision.allowed) {
+        return {
+          id: ulid(),
+          name: toolName,
+          arguments: args,
+          result: "",
+          durationMs: Date.now() - startTime,
+          error: `Treasury denied: ${decision.reasonCode} — ${decision.message}`,
+        };
+      }
+      treasuryAuthorizationId = decision.authorizationId;
+    } catch (err: any) {
+      logger.error(
+        "Treasury authorization unavailable; financial operation blocked",
+        err instanceof Error ? err : undefined,
+        { tool: toolName },
+      );
+      return {
+        id: ulid(),
+        name: toolName,
+        arguments: args,
+        result: "",
+        durationMs: Date.now() - startTime,
+        error: `Treasury denied: TREASURY_UNAVAILABLE — authorization failed, operation blocked`,
+      };
+    }
+  }
+
   try {
-    let result = await tool.execute(args, context);
+    let result = await executeWithTimeout(
+      () => tool.execute(args, context),
+      authorization.timeoutMs,
+      toolName,
+    );
 
     // Sanitize results from external source tools
     if (EXTERNAL_SOURCE_TOOLS.has(toolName)) {
       result = sanitizeToolResult(result);
+    }
+
+    // Bound result size before it reaches the model context
+    result = truncateToolOutput(result, authorization.maxOutputBytes);
+
+    if (treasuryAuthorizationId) {
+      try {
+        const guard = getTreasuryGuard(context);
+        if (isFinancialFailure(result)) {
+          guard.release(treasuryAuthorizationId, "tool_reported_failure");
+        } else {
+          const committed = guard.commit(treasuryAuthorizationId);
+          if (!committed.ok) {
+            logger.error(
+              "Treasury commit failed after execution",
+              undefined,
+              { tool: toolName, reason: committed.reason ?? "unknown" },
+            );
+          }
+        }
+      } catch (error) {
+        logger.error(
+          "Treasury reconciliation failed",
+          error instanceof Error ? error : undefined,
+          { tool: toolName },
+        );
+      }
     }
 
     // Record spend for financial operations
@@ -3364,6 +3661,21 @@ export async function executeTool(
               "Spend tracking failed for transfer_credits",
               error instanceof Error ? error : undefined,
             );
+            // The money moved but the hourly/daily aggregate did not, so the next
+            // pre-check will under-count. Record it where an operator can see it.
+            if (context.db?.raw) {
+              tryAppendSecurityEvent(context.db.raw, {
+                severity: "CRITICAL",
+                category: "treasury",
+                eventType: "spend.tracking_failed",
+                actor: context.identity?.address ?? null,
+                details: {
+                  tool: toolName,
+                  amountCents: amount,
+                  reason: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+                },
+              });
+            }
           }
         }
       } else if (toolName === "x402_fetch") {
@@ -3387,6 +3699,19 @@ export async function executeTool(
             "Spend tracking failed for x402_fetch",
             error instanceof Error ? error : undefined,
           );
+          if (context.db?.raw) {
+            tryAppendSecurityEvent(context.db.raw, {
+              severity: "CRITICAL",
+              category: "treasury",
+              eventType: "spend.tracking_failed",
+              actor: context.identity?.address ?? null,
+              details: {
+                tool: toolName,
+                amountCents: 0,
+                reason: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+              },
+            });
+          }
         }
       }
     }
@@ -3399,6 +3724,17 @@ export async function executeTool(
       durationMs: Date.now() - startTime,
     };
   } catch (err: any) {
+    if (treasuryAuthorizationId) {
+      try {
+        getTreasuryGuard(context).release(treasuryAuthorizationId, "execution_error");
+      } catch (releaseError) {
+        logger.error(
+          "Treasury release failed after execution error",
+          releaseError instanceof Error ? releaseError : undefined,
+          { tool: toolName },
+        );
+      }
+    }
     return {
       id: ulid(),
       name: toolName,
@@ -3410,7 +3746,43 @@ export async function executeTool(
   }
 }
 
-/** Escape a string for safe shell interpolation. */
-function escapeShellArg(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`;
+/**
+ * Run a tool execution with a hard dispatch timeout. A non-positive or
+ * non-finite timeout disables the race (used only by explicit configuration).
+ */
+async function executeWithTimeout(
+  run: () => Promise<string>,
+  timeoutMs: number,
+  toolName: string,
+): Promise<string> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return run();
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(`Tool "${toolName}" exceeded dispatch timeout of ${timeoutMs}ms`),
+        ),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([run(), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Truncate tool output to a byte budget, keeping the head of the result. */
+function truncateToolOutput(result: string, maxBytes: number): string {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) return result;
+  const size = Buffer.byteLength(result, "utf-8");
+  if (size <= maxBytes) return result;
+  const head = Buffer.from(result, "utf-8")
+    .subarray(0, Math.max(0, maxBytes - 64))
+    .toString("utf-8");
+  const omitted = size - Buffer.byteLength(head, "utf-8");
+  return `${head}\n[truncated: ${omitted} bytes omitted]`;
 }

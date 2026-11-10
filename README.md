@@ -22,6 +22,29 @@ The result is the first automaton.
 
 Update: development of Automaton has continued across Conway's internal RL environments for faster iteration & new capabilities. Stay tuned. It's beautiful.
 
+## Deployment state (2026-11-10)
+
+This checkout (the repository root) is a **locked-down, pre-activation** deployment.
+It is not running the autonomous behaviour described below, by design:
+
+| Item | State |
+|---|---|
+| Agent | inactive; never started |
+| `security.lockdown` / `activationApproved` | `true` / `false` |
+| `allowedTools` / `maxChildren` | `[]` / `0` |
+| Financial tools, host shell, self-modification, replication, external exposure | all `false` |
+| Treasury | 12 monetary limits zero; x402 allowlist empty |
+| Wallet | absent (no key material on disk) |
+| Production database | schema V11, hash-verified unchanged; V14 migration tested only on disposable copies behind `CONWAY_MIGRATION_APPROVAL` |
+| Dashboard | `http://127.0.0.1:8787`, loopback only, operator-token auth, read-only |
+| Health | five-state guardian (`healthy`/`degraded`/`failed`/`blocked`/`requires_operator`); the mechanic never executes repairs |
+| Repair approvals | durable and **non-executing**: approving moves a proposal to `ready_for_execution` and stops |
+
+The upstream Quick Start below generates a wallet and activates the agent. Do **not** use it in
+this deployment without the separate documented approvals. Start the console with
+`START_CONWAY_DASHBOARD.bat`; it never starts the agent. The evidence for the final state is in
+[`reports/PROJECT_FINAL_HANDOVER/`](reports/PROJECT_FINAL_HANDOVER/).
+
 ## Quick Start
 
 ```bash

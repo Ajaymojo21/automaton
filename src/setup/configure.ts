@@ -275,6 +275,18 @@ async function configureTreasury(config: AutomatonConfig): Promise<void> {
     ...(config.treasuryPolicy ?? {}),
   };
 
+  // Fail-closed: the Phase 15 monthly/agent/child budgets default to 0 unless the
+  // operator has explicitly set them (F-1 remediation). They are not prompted here.
+  if (config.treasuryPolicy?.maxMonthlyTransferCents === undefined) {
+    t.maxMonthlyTransferCents = 0;
+  }
+  if (config.treasuryPolicy?.agentBudgetCents === undefined) {
+    t.agentBudgetCents = 0;
+  }
+  if (config.treasuryPolicy?.childBudgetCents === undefined) {
+    t.childBudgetCents = 0;
+  }
+
   t.maxSingleTransferCents = await askNumber("Max single transfer", t.maxSingleTransferCents);
   t.maxHourlyTransferCents = await askNumber("Max hourly transfers", t.maxHourlyTransferCents);
   t.maxDailyTransferCents = await askNumber("Max daily transfers", t.maxDailyTransferCents);

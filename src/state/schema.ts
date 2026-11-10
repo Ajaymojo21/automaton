@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 14;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -589,7 +589,7 @@ export const MIGRATION_V9 = `
   -- Schema version: 9
   -- Tables: goals, task_graph, event_stream
 
-  CREATE TABLE goals (
+  CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,                    -- ULID
     title TEXT NOT NULL,
     description TEXT NOT NULL,
@@ -602,7 +602,7 @@ export const MIGRATION_V9 = `
     completed_at TEXT
   );
 
-  CREATE TABLE task_graph (
+  CREATE TABLE IF NOT EXISTS task_graph (
     id TEXT PRIMARY KEY,                    -- ULID
     parent_id TEXT,                         -- parent task (decomposition)
     goal_id TEXT NOT NULL REFERENCES goals(id),
@@ -624,11 +624,11 @@ export const MIGRATION_V9 = `
     completed_at TEXT
   );
 
-  CREATE INDEX idx_task_graph_goal ON task_graph(goal_id);
-  CREATE INDEX idx_task_graph_status ON task_graph(status);
-  CREATE INDEX idx_task_graph_assigned ON task_graph(assigned_to);
+  CREATE INDEX IF NOT EXISTS idx_task_graph_goal ON task_graph(goal_id);
+  CREATE INDEX IF NOT EXISTS idx_task_graph_status ON task_graph(status);
+  CREATE INDEX IF NOT EXISTS idx_task_graph_assigned ON task_graph(assigned_to);
 
-  CREATE TABLE event_stream (
+  CREATE TABLE IF NOT EXISTS event_stream (
     id TEXT PRIMARY KEY,                    -- ULID
     type TEXT NOT NULL,                     -- EventType enum
     agent_address TEXT NOT NULL,
@@ -640,9 +640,9 @@ export const MIGRATION_V9 = `
     created_at TEXT NOT NULL
   );
 
-  CREATE INDEX idx_events_agent ON event_stream(agent_address, created_at);
-  CREATE INDEX idx_events_goal ON event_stream(goal_id, created_at);
-  CREATE INDEX idx_events_type ON event_stream(type, created_at);
+  CREATE INDEX IF NOT EXISTS idx_events_agent ON event_stream(agent_address, created_at);
+  CREATE INDEX IF NOT EXISTS idx_events_goal ON event_stream(goal_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_events_type ON event_stream(type, created_at);
 `;
 
 // Role column for children table (must be separate statement for SQLite ALTER)
@@ -662,7 +662,7 @@ export const MIGRATION_V10 = `
   -- Schema version: 10
   -- Tables: knowledge_store
 
-  CREATE TABLE knowledge_store (
+  CREATE TABLE IF NOT EXISTS knowledge_store (
     id TEXT PRIMARY KEY,                    -- ULID
     category TEXT NOT NULL,                 -- market|technical|social|financial|operational
     key TEXT NOT NULL,
@@ -676,6 +676,247 @@ export const MIGRATION_V10 = `
     expires_at TEXT
   );
 
-  CREATE INDEX idx_knowledge_category ON knowledge_store(category);
-  CREATE INDEX idx_knowledge_key ON knowledge_store(key);
+  CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_store(category);
+  CREATE INDEX IF NOT EXISTS idx_knowledge_key ON knowledge_store(key);
 `;
+
+// === Phase 15: Centralized Treasury + Tamper-Evident Audit ===
+//
+// treasury_authorizations is the single record of every financial decision.
+// Reserved rows count toward every budget until they are committed or released,
+// so an in-flight transfer cannot be double-spent by a concurrent call.
+export const MIGRATION_V12 = `
+  -- Schema version: 12
+  -- Tables: treasury_authorizations, security_events
+
+  CREATE TABLE IF NOT EXISTS treasury_authorizations (
+    id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    tool_name TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    requested_amount_cents INTEGER NOT NULL,
+    recipient TEXT,
+    domain TEXT,
+    child_id TEXT,
+    actor TEXT,
+    decision TEXT NOT NULL CHECK(decision IN ('allow','deny')),
+    status TEXT NOT NULL CHECK(status IN ('reserved','committed','released','denied')),
+    reason_code TEXT,
+    reason_message TEXT,
+    balance_cents INTEGER,
+    created_ms INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    committed_ms INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_treasury_created ON treasury_authorizations(created_ms);
+  CREATE INDEX IF NOT EXISTS idx_treasury_status ON treasury_authorizations(operation, status);
+  CREATE INDEX IF NOT EXISTS idx_treasury_child ON treasury_authorizations(child_id, status);
+  CREATE INDEX IF NOT EXISTS idx_treasury_decision ON treasury_authorizations(decision, status);
+
+  CREATE TRIGGER IF NOT EXISTS treasury_authorizations_no_delete
+    BEFORE DELETE ON treasury_authorizations
+    BEGIN
+      SELECT RAISE(ABORT, 'treasury_authorizations is append-only');
+    END;
+
+  CREATE TABLE IF NOT EXISTS security_events (
+    id TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL UNIQUE,
+    timestamp TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    category TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    actor TEXT,
+    details TEXT NOT NULL DEFAULT '{}',
+    prev_hash TEXT NOT NULL,
+    hash TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_security_events_time ON security_events(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity, timestamp);
+  CREATE INDEX IF NOT EXISTS idx_security_events_category ON security_events(category, timestamp);
+
+  CREATE TRIGGER IF NOT EXISTS security_events_no_update
+    BEFORE UPDATE ON security_events
+    BEGIN
+      SELECT RAISE(ABORT, 'security_events is append-only');
+    END;
+
+  CREATE TRIGGER IF NOT EXISTS security_events_no_delete
+    BEFORE DELETE ON security_events
+    BEGIN
+      SELECT RAISE(ABORT, 'security_events is append-only');
+    END;
+`;
+
+export const MIGRATION_V13 = `
+  -- Schema version: 13
+  -- Tables: security_incidents, security_seals
+
+  CREATE TABLE IF NOT EXISTS security_incidents (
+    id TEXT PRIMARY KEY,
+    created_ms INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('INFO','LOW','MEDIUM','HIGH','CRITICAL')),
+    category TEXT NOT NULL,
+    incident_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    source_sequence INTEGER,
+    status TEXT NOT NULL CHECK(status IN ('open','acknowledged','resolved')),
+    acknowledged_by TEXT,
+    acknowledged_ms INTEGER,
+    resolved_by TEXT,
+    resolved_ms INTEGER,
+    resolution TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_incidents_status ON security_incidents(status, severity, created_ms);
+  CREATE INDEX IF NOT EXISTS idx_incidents_type ON security_incidents(incident_type, created_ms);
+  CREATE INDEX IF NOT EXISTS idx_incidents_created ON security_incidents(created_ms);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_dedupe
+    ON security_incidents(incident_type, source_sequence)
+    WHERE source_sequence IS NOT NULL;
+
+  CREATE TRIGGER IF NOT EXISTS security_incidents_no_delete
+    BEFORE DELETE ON security_incidents
+    BEGIN
+      SELECT RAISE(ABORT, 'security_incidents is append-only (resolve, do not delete)');
+    END;
+
+  CREATE TABLE IF NOT EXISTS security_seals (
+    id TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL UNIQUE,
+    head_hash TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    actor TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_seals_sequence ON security_seals(sequence);
+
+  CREATE TRIGGER IF NOT EXISTS security_seals_no_update
+    BEFORE UPDATE ON security_seals
+    BEGIN
+      SELECT RAISE(ABORT, 'security_seals is append-only');
+    END;
+
+  CREATE TRIGGER IF NOT EXISTS security_seals_no_delete
+    BEFORE DELETE ON security_seals
+    BEGIN
+      SELECT RAISE(ABORT, 'security_seals is append-only');
+    END;
+`;
+
+// === Phase 23: Durable repair-approval governance (B-2 / B-8) ===
+//
+// The approval lifecycle lived in a Map, so every restart erased the record of who approved
+// what. `repair_approvals` is the durable current state; `repair_approval_events` is the
+// append-only, hash-chained history (same construction as security_events). Approval never
+// executes a repair: the terminal state of an approval decision is `ready_for_execution`.
+export const MIGRATION_V14 = `
+  -- Schema version: 14
+  -- Tables: repair_approvals, repair_approval_events
+
+  CREATE TABLE IF NOT EXISTS repair_approvals (
+    id TEXT PRIMARY KEY,
+    finding_id TEXT NOT NULL,
+    component TEXT NOT NULL,
+    root_cause TEXT NOT NULL,
+    proposed_action TEXT NOT NULL,
+    expected_benefit TEXT NOT NULL,
+    potential_side_effects TEXT NOT NULL,
+    risk_classification TEXT NOT NULL CHECK(risk_classification IN ('low','medium','high','critical')),
+    required_permissions TEXT NOT NULL DEFAULT '[]',
+    expected_downtime INTEGER NOT NULL DEFAULT 0,
+    rollback_possible INTEGER NOT NULL DEFAULT 0,
+    created_ms INTEGER NOT NULL,
+    expires_ms INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('detected','diagnosis','repair_proposed','awaiting_approval','approved','rejected','expired','ready_for_execution','verification','completed','failed')),
+    approval_identity TEXT,
+    decision_ms INTEGER,
+    decision_reason TEXT,
+    audit_reference TEXT,
+    action_hash TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    decision_key TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_repair_approvals_status
+    ON repair_approvals(status, created_ms);
+  CREATE INDEX IF NOT EXISTS idx_repair_approvals_finding
+    ON repair_approvals(finding_id, action_hash);
+
+  -- Duplicate prevention: one live approval request per finding+action.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_repair_approvals_live
+    ON repair_approvals(finding_id, action_hash)
+    WHERE status IN ('awaiting_approval','ready_for_execution');
+
+  -- Replay protection: a decision key can settle exactly one proposal.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_repair_approvals_decision_key
+    ON repair_approvals(decision_key)
+    WHERE decision_key IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS repair_approval_events (
+    id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    at_ms INTEGER NOT NULL,
+    at_iso TEXT NOT NULL,
+    event TEXT NOT NULL,
+    actor TEXT,
+    detail TEXT NOT NULL DEFAULT '{}',
+    prev_hash TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    UNIQUE(proposal_id, sequence)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_repair_approval_events_proposal
+    ON repair_approval_events(proposal_id, sequence);
+
+  CREATE TRIGGER IF NOT EXISTS repair_approval_events_no_update
+    BEFORE UPDATE ON repair_approval_events
+    BEGIN
+      SELECT RAISE(ABORT, 'repair_approval_events is append-only');
+    END;
+
+  CREATE TRIGGER IF NOT EXISTS repair_approval_events_no_delete
+    BEFORE DELETE ON repair_approval_events
+    BEGIN
+      SELECT RAISE(ABORT, 'repair_approval_events is append-only');
+    END;
+`;
+
+/**
+ * The objects a block of DDL is meant to create.
+ *
+ * Derived from the SQL itself rather than hand-maintained, so the manifest cannot
+ * drift away from the migration it describes. The runner verifies these names
+ * before it records a version, which is what stops a `schema_version` row from
+ * claiming a schema that was never built (F-18-02).
+ */
+export interface DeclaredObjects {
+  tables: string[];
+  indexes: string[];
+  triggers: string[];
+  columns: { table: string; column: string }[];
+}
+
+export function declaredObjects(sql: string): DeclaredObjects {
+  const code = sql.replace(/--[^\n]*/g, "");
+  const names = (pattern: RegExp): string[] =>
+    [...code.matchAll(pattern)].map((match) => match[1]);
+  const columns = [
+    ...code.matchAll(/ALTER\s+TABLE\s+([A-Za-z0-9_]+)\s+ADD\s+COLUMN\s+([A-Za-z0-9_]+)/gi),
+  ].map((match) => ({ table: match[1], column: match[2] }));
+
+  return {
+    tables: names(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z0-9_]+)/gi),
+    indexes: names(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z0-9_]+)/gi),
+    triggers: names(/CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z0-9_]+)/gi),
+    columns,
+  };
+}

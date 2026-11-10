@@ -374,12 +374,63 @@ describe("Heartbeat Tasks", () => {
         config: createTestConfig(),
         db,
         conway,
+        // Stub: this path used to call api.conway.tech for real, which made the test
+        // depend on the network and time out intermittently.
+        topup: async () => ({ success: false, amountUsd: 5, error: "stubbed: no payment performed" }),
       };
 
       const result = await BUILTIN_TASKS.check_usdc_balance(tickCtx, taskCtx);
 
       expect(result.shouldWake).toBe(true);
       expect(result.message).toContain("USDC");
+      expect(result.message).toContain("stubbed: no payment performed");
+    });
+
+    it("reports a successful topup without waking twice", async () => {
+      const tickCtx = createMockTickContext(db, {
+        creditBalance: 0,
+        usdcBalance: 10.0,
+        survivalTier: "critical",
+      });
+      const taskCtx: HeartbeatLegacyContext = {
+        identity: createTestIdentity(),
+        config: createTestConfig(),
+        db,
+        conway,
+        topup: async () => ({ success: true, amountUsd: 5, creditsCentsAdded: 500 }),
+      };
+
+      const result = await BUILTIN_TASKS.check_usdc_balance(tickCtx, taskCtx);
+
+      expect(result.shouldWake).toBe(true);
+      expect(result.message).toContain("Auto-topped up $5");
+      expect(result.message).not.toContain("failed");
+    });
+
+    it("never attempts a topup while lockdown blocks financial tools", async () => {
+      const tickCtx = createMockTickContext(db, {
+        creditBalance: 0,
+        usdcBalance: 10.0,
+        survivalTier: "critical",
+      });
+      let called = false;
+      const taskCtx: HeartbeatLegacyContext = {
+        identity: createTestIdentity(),
+        config: createTestConfig({
+          security: { lockdown: true, allowFinancialTools: false },
+        }),
+        db,
+        conway,
+        topup: async () => {
+          called = true;
+          return { success: true, amountUsd: 5 };
+        },
+      };
+
+      const result = await BUILTIN_TASKS.check_usdc_balance(tickCtx, taskCtx);
+
+      expect(result.shouldWake).toBe(false);
+      expect(called).toBe(false);
     });
 
     it("does not wake when USDC below threshold", async () => {

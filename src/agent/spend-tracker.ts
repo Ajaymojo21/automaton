@@ -37,6 +37,26 @@ function getCurrentDayWindow(): string {
   return now.toISOString().slice(0, 10); // '2026-02-19'
 }
 
+/**
+ * A spend tracker that records nothing. Turn context has to exist for policy
+ * evaluation to run, so this is the fallback for a dispatch path that has no
+ * real tracker wired in.
+ */
+export const NOOP_SPEND_TRACKER: SpendTrackerInterface = {
+  recordSpend: () => {},
+  getHourlySpend: () => 0,
+  getDailySpend: () => 0,
+  getTotalSpend: () => 0,
+  checkLimit: () => ({
+    allowed: true,
+    currentHourlySpend: 0,
+    currentDailySpend: 0,
+    limitHourly: Number.MAX_SAFE_INTEGER,
+    limitDaily: Number.MAX_SAFE_INTEGER,
+  }),
+  pruneOldRecords: () => 0,
+};
+
 export class SpendTracker implements SpendTrackerInterface {
   private db: Database.Database;
 

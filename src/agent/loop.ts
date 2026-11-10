@@ -24,8 +24,12 @@ import type {
   InputSource,
   ModelStrategyConfig,
 } from "../types.js";
-import { DEFAULT_MODEL_STRATEGY_CONFIG } from "../types.js";
-import type { PolicyEngine } from "./policy-engine.js";
+import { DEFAULT_MODEL_STRATEGY_CONFIG, DEFAULT_SECURITY_CONFIG, DEFAULT_TREASURY_POLICY } from "../types.js";
+import { resolveTreasuryPolicy } from "../security/treasury-guard.js";
+import { stateDir } from "../runtime/home-guard.js";
+import { PolicyEngine } from "./policy-engine.js";
+import { createDefaultRules } from "./policy-rules/index.js";
+import { NOOP_SPEND_TRACKER } from "./spend-tracker.js";
 import { buildSystemPrompt, buildWakeupPrompt } from "./system-prompt.js";
 import { buildContextMessages, trimContext } from "./context.js";
 import {
@@ -93,8 +97,21 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<void> {
-  const { identity, config, db, conway, inference, social, skills, policyEngine, spendTracker, onStateChange, onTurnComplete, ollamaBaseUrl } =
+  const { identity, config, db, conway, inference, social, skills, spendTracker, onStateChange, onTurnComplete, ollamaBaseUrl } =
     options;
+
+  // Phase 16A.1: the policy layer is mandatory at dispatch, so an entry point that
+  // constructs the loop without an engine must not end up with a runtime whose
+  // sensitive tools are all silently denied. Build the same engine src/index.ts does.
+  const policyEngine =
+    options.policyEngine ??
+    new PolicyEngine(
+      db.raw,
+      createDefaultRules(
+        resolveTreasuryPolicy(config),
+        config.security ?? DEFAULT_SECURITY_CONFIG,
+      ),
+    );
 
   const builtinTools = createBuiltinTools(identity.sandboxId);
   const installedTools = loadInstalledTools(db);
@@ -156,11 +173,7 @@ export async function runAgentLoop(
         process.env.OPENAI_BASE_URL = `${config.conwayApiUrl}/v1`;
       }
 
-      const providersPath = path.join(
-        process.env.HOME || process.cwd(),
-        ".automaton",
-        "inference-providers.json",
-      );
+      const providersPath = path.join(stateDir(), "inference-providers.json");
       const registry = ProviderRegistry.fromConfig(providersPath);
 
       // If OPENAI_BASE_URL was set (Conway fallback), update the default
@@ -664,11 +677,15 @@ export async function runAgentLoop(
             tools,
             toolContext,
             policyEngine,
-            spendTracker ? {
+            // Always supplied: executeTool only evaluates policy when a turn
+            // context exists, so gating it on the spend tracker being wired
+            // would let an absent tracker switch the rules off.
+            {
               inputSource: currentInputSource,
               turnToolCallCount: turn.toolCalls.filter(t => t.name === "transfer_credits").length,
-              sessionSpend: spendTracker,
-            } : undefined,
+              sessionSpend: spendTracker ?? NOOP_SPEND_TRACKER,
+              turnId: turn.id,
+            },
           );
 
           // Override the ID to match the inference call's ID

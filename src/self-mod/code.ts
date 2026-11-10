@@ -20,6 +20,8 @@ import type {
   AutomatonDatabase,
 } from "../types.js";
 import { logModification } from "./audit-log.js";
+import { isProtectedPath } from "../security/sandbox.js";
+import { joinTilde } from "../runtime/home-guard.js";
 
 // ─── IMMUTABLE SAFETY INVARIANTS ─────────────────────────────
 // These are hard-coded and CANNOT be changed by the agent.
@@ -125,7 +127,7 @@ function resolveAndValidatePath(filePath: string): string | null {
     // Step 1: Resolve ~ to home
     let resolved = filePath;
     if (resolved.startsWith("~")) {
-      resolved = path.join(process.env.HOME || "/root", resolved.slice(1));
+      resolved = joinTilde(resolved);
     }
 
     // Step 2: Resolve to absolute path (handles .. and relative paths)
@@ -177,11 +179,21 @@ export function isProtectedFile(filePath: string): boolean {
         resolved === pattern) {
       return true;
     }
-    // Handle absolute patterns like /etc/systemd
-    if (pattern.startsWith("/") && resolved.startsWith(pattern)) {
-      return true;
+    // Absolute patterns like "/etc/systemd" have to be resolved the same way the
+    // input is. On Windows path.resolve maps both to the current drive, so
+    // comparing the raw literal against the resolved path never matched and every
+    // absolute pattern in the list was inert on the platform this runs on.
+    if (pattern.startsWith("/")) {
+      const patternRoot = path.resolve(pattern);
+      if (resolved === patternRoot || resolved.startsWith(patternRoot + path.sep)) return true;
     }
   }
+
+  // The sandbox already owns the list of protected locations (system directories
+  // for the current platform, user documents, browser profiles, other AI tool
+  // configs, credential dirs). Reusing it keeps one source of truth instead of a
+  // second, POSIX-only list that silently under-protects Windows.
+  if (isProtectedPath(filePath)) return true;
 
   return false;
 }

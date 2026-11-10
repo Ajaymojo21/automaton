@@ -31,6 +31,15 @@ export interface TopupResult {
 }
 
 /**
+ * Phase 15: optional pre-payment authorization hook. Callers supply the
+ * centralized treasury guard so every credit purchase passes that layer.
+ */
+export type TopupAuthorizer = (amountCents: number) => {
+  allowed: boolean;
+  reason?: string;
+};
+
+/**
  * Execute a credit topup via x402 payment.
  *
  * Calls GET /pay/{amountUsd}/{address} which returns HTTP 402.
@@ -83,6 +92,7 @@ export async function topupForSandbox(params: {
   account: PrivateKeyAccount;
   error: Error & { status?: number; responseText?: string };
   chainType?: ChainType;
+  authorize?: TopupAuthorizer;
 }): Promise<TopupResult | null> {
   const { apiUrl, account, error, chainType } = params;
 
@@ -134,6 +144,23 @@ export async function topupForSandbox(params: {
   }
 
   logger.info(`Sandbox topup: deficit=${deficitCents}c, buying $${selectedTier} tier`);
+
+  if (params.authorize) {
+    let verdict: { allowed: boolean; reason?: string };
+    try {
+      verdict = params.authorize(selectedTier * 100);
+    } catch (err: any) {
+      logger.warn(`Sandbox topup authorization failed; skipping: ${err?.message ?? err}`);
+      return null;
+    }
+    if (!verdict.allowed) {
+      logger.warn(
+        `Sandbox topup denied by treasury: ${verdict.reason || "not authorized"}`,
+      );
+      return null;
+    }
+  }
+
   return topupCredits(apiUrl, account, selectedTier);
 }
 
@@ -151,6 +178,7 @@ export async function bootstrapTopup(params: {
   creditsCents: number;
   creditThresholdCents?: number;
   chainType?: ChainType;
+  authorize?: TopupAuthorizer;
 }): Promise<TopupResult | null> {
   const { apiUrl, account, creditsCents, creditThresholdCents = 500, chainType } = params;
 
@@ -187,6 +215,22 @@ export async function bootstrapTopup(params: {
   logger.info(
     `Bootstrap topup: credits=$${(creditsCents / 100).toFixed(2)}, USDC=$${usdcBalance.toFixed(2)}, buying $${minTier}`,
   );
+
+  if (params.authorize) {
+    let verdict: { allowed: boolean; reason?: string };
+    try {
+      verdict = params.authorize(minTier * 100);
+    } catch (err: any) {
+      logger.warn(`Bootstrap topup authorization failed; skipping: ${err?.message ?? err}`);
+      return null;
+    }
+    if (!verdict.allowed) {
+      logger.warn(
+        `Bootstrap topup denied by treasury: ${verdict.reason || "not authorized"}`,
+      );
+      return null;
+    }
+  }
 
   return topupCredits(apiUrl, account, minTier);
 }

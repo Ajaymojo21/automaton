@@ -95,7 +95,12 @@ describe("Agent Loop", () => {
     );
     expect(execTurn).toBeDefined();
     const execCall = execTurn!.toolCalls.find((tc) => tc.name === "exec");
-    expect(execCall!.result).toContain("Blocked");
+    // The refusal now comes from the policy engine rather than the inline
+    // secondary net, so it lands in `error`:
+    //   "Policy denied: FORBIDDEN_COMMAND — Blocked: Delete .automaton directory …"
+    // The loop always carries an engine since 16A.1, which is what moved the layer.
+    expect(execCall!.error).toContain("FORBIDDEN_COMMAND");
+    expect(execCall!.error).toContain("Blocked");
 
     // conway.exec should NOT have been called
     expect(conway.execCalls.length).toBe(0);

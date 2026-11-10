@@ -1,0 +1,315 @@
+================================================================================
+PHASE 16B — WINDOWS HOST SECURITY POSTURE (RAW EVIDENCE DUMP)
+Host: <host-name> | User: <windows-user> (non-elevated) | Windows 11 Home
+Captured: 01-11-2026 11:41 (local) | Shell: Git Bash -> powershell.exe 5.1 (-NoProfile)
+MODE: STRICTLY READ-ONLY. No settings changed. No BitLocker protectors/keys queried.
+================================================================================
+
+SECTION 1 — BitLocker / drive encryption status
+--------------------------------------------------------------------------------
+$ manage-bde -status
+BitLocker Drive Encryption: Configuration Tool version 10.0.26100
+Copyright (C) 2013 Microsoft Corporation. All rights reserved.
+
+ERROR: An attempt to access a required resource was denied.
+
+Check that you have administrative rights on the computer.
+(Exit code 1)
+=> RESULT: DENIED (needs elevation)
+=> NOTE: Per project rules, `manage-bde -protectors -get` and any key/protector
+   disclosure commands were NOT attempted. Encryption state of any volume
+   remains UNVERIFIED without elevation.
+
+SECTION 2 — TPM presence and ownership
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command 'Get-Tpm'
+Administrator privilege is required to execute this command.
+(Exit code 1)
+
+$ powershell.exe -NoProfile -Command 'Get-CimInstance -ClassName Win32_Tpm'
+Get-CimInstance : Invalid class
+At line:1 char:1
++ Get-CimInstance -ClassName Win32_Tpm
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo: MetadataError: (root\cimv2:Win32_Tpm:String) [Get-CimInstance], CimException
+    + FullyQualifiedErrorId : HRESULT 0x80041010,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand
+(Exit code 1 — class lives in root\cimv2\Security\MicrosoftTpm, not root\cimv2)
+
+$ powershell.exe -NoProfile -Command 'Get-CimInstance -Namespace "root\cimv2\Security\MicrosoftTpm" -ClassName Win32_Tpm'
+Get-CimInstance : Access denied
+At line:1 char:1
++ Get-CimInstance -Namespace "root\cimv2\Security\MicrosoftTpm" -ClassN ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo: PermissionDenied: (root\cimv2\Secu...ftTpm:Win32_Tpm:String) [Get-CimInstance], CimException
+    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand
+(Exit code 1)
+=> RESULT: DENIED (needs elevation)
+=> NOTE: TPM presence/ownership/ready-state UNVERIFIED. Indirect signal only:
+   BitLocker setup wizard/KeyIso service (see Section 7) — not proof of TPM ownership.
+
+SECTION 3 — Secure Boot state
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command 'Confirm-SecureBootUEFI'
+Confirm-SecureBootUEFI : Unable to set proper privileges. Access was denied.
+At line:1 char:1
++ Confirm-SecureBootUEFI
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo: PermissionDenied: (Microsoft.Secur...BootUefiCommand:ConfirmSecureBootUefiCommand) [Confirm-SecureBootUEFI], UnauthorizedAccessException
+    + FullyQualifiedErrorId : SetPrivilegeFailed,Microsoft.SecureBoot.Commands.ConfirmSecureBootUefiCommand
+(Exit code 1 — cmdlet requires SeTcbPrivilege)
+
+$ powershell.exe -NoProfile -Command '$k="HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State"; if (Test-Path $k) { Get-ItemProperty -Path $k | Format-List } else { Write-Output "SecureBoot State registry key NOT FOUND" }'
+UEFISecureBootEnabled : 1
+PolicyPublisher       : {77fa9abd-0359-4d32-bd60-28f4e78f784b}
+PolicyVersion         : 1
+PSPath                : Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecureBoot\State
+PSParentPath          : Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecureBoot
+PSChildName           : State
+PSDrive               : HKLM
+PSProvider            : Microsoft.PowerShell.Core\Registry
+=> RESULT: VERIFIED
+=> CONCLUSION: Secure Boot is enabled — HKLM\...\Control\SecureBoot\State UEFISecureBootEnabled = 1 (Microsoft policy publisher).
+
+$ powershell.exe -NoProfile -Command 'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Manufacturer,Model,HpcIsUnix,PCSystemType,PartOfDomain | Format-List'
+Manufacturer : LENOVO
+Model        : 83DV
+HpcIsUnix    :
+PCSystemType : 2
+PartOfDomain : False
+=> RESULT: VERIFIED
+=> CONCLUSION: Lenovo machine, model 83DV, mobile/desktop (PCSystemType 2), not domain-joined (workgroup).
+
+SECTION 4 — Windows Defender (Microsoft Defender Antivirus)
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command 'Get-MpComputerStatus'
+[fields verbatim; full output captured]
+AMEngineVersion                  : 1.1.26100.4
+AMProductVersion                 : 4.18.26100.4
+AMRunningMode                    : Normal
+AMServiceEnabled                 : True
+AMServiceVersion                 : 4.18.26100.4
+AntispywareEnabled               : True
+AntispywareSignatureAge          : 0
+AntispywareSignatureLastUpdated  : 01-11-2026 02:56:31
+AntispywareSignatureVersion      : 1.463.68.0
+AntivirusEnabled                 : True
+AntivirusSignatureAge            : 0
+AntivirusSignatureLastUpdated    : 01-11-2026 02:56:31
+AntivirusSignatureVersion        : 1.463.68.0
+BehaviorMonitorEnabled           : True
+ComputerID                       : 8106ACED-2979-4DDE-A4E9-A1DA6188E39E
+ComputerState                    : 0
+ConfigurationProtection          : 0
+DefenderSignaturesOutOfDate      : False
+DeviceControlDefaultEnforcement  :
+DeviceControlPoliciesLastUpdated : 01-01-1601 05:30:00
+DeviceControlState               : Disabled
+FullScanAge                      : 4294967295
+FullScanOverdue                  : False
+FullScanRequired                 : False
+InitializationProgress           : ServiceStartedSuccessfully
+IoavProtectionEnabled            : True
+IsTamperProtected                : True
+IsVirtualMachine                 : False
+LastQuickScanSource              : 2
+NISEnabled                       : True
+NISEngineVersion                 : 1.1.26100.4
+NISSignatureAge                  : 0
+NISSignatureLastUpdated          : 01-11-2026 02:56:31
+NISSignatureVersion              : 1.463.68.0
+OnAccessProtectionEnabled        : True
+ProductStatus                    : 524288
+QuickScanAge                     : 0
+QuickScanEndTime                 : 31-10-2026 21:33:00
+QuickScanOverdue                 : False
+QuickScanStartTime               : 31-10-2026 21:31:10
+RealTimeProtectionEnabled        : True
+RealTimeScanDirection            : 0
+RebootRequired                   : False
+TamperProtectionSource           : Signatures
+(Exit code 0)
+=> RESULT: VERIFIED
+=> CONCLUSION: Real-time protection ON; antivirus, antispyware, network inspection (NIS), IOAV and behavior monitoring all ENABLED; signatures current (age 0, updated 01-11-2026); Tamper Protection ON (signature-sourced); Defender running in Normal mode (no third-party AV takeover).
+
+$ powershell.exe -NoProfile -Command 'Get-MpPreference'
+[full ~140-line output captured; security-relevant fields verbatim]
+AttackSurfaceReductionOnlyExclusions                  : {N/A: Must be an administrator to view exclusions}
+AttackSurfaceReductionRules_Actions                   :
+AttackSurfaceReductionRules_Ids                       :
+AttackSurfaceReductionRules_RuleSpecificExclusions    : {N/A: Must be an administrator to view exclusions}
+BruteForceProtectionConfiguredState                   : 0
+CloudBlockLevel                                       : 0
+DisableRealtimeMonitoring                             : False
+DisableBehaviorMonitoring                             : False
+DisableBlockAtFirstSeen                               : False
+DisableIOAVProtection                                 : False
+DisableScriptScanning                                 : False
+DisableTamperProtection                               : False
+EnableControlledFolderAccess                          : 0
+EnableNetworkProtection                               : 0
+ExclusionExtension                                    : {N/A: Must be an administrator to view exclusions}
+ExclusionIpAddress                                    : {N/A: Must be an administrator to view exclusions}
+ExclusionPath                                         : {N/A: Must be an administrator to view exclusions}
+ExclusionProcess                                      : {N/A: Must be an administrator to view exclusions}
+PUAProtection                                         : 2
+HighThreatDefaultAction                               : 0
+SevereThreatDefaultAction                             : 0
+MAPSReporting                                         : 2
+SubmitSamplesConsent                                  : 1
+(Exit code 0)
+=> RESULT: VERIFIED (with admin-restricted gaps)
+=> CONCLUSION: No custom ASR rule IDs/actions configured at machine level as visible to this session; PUA protection = 2 (administrative/default-on); real-time monitoring not disabled.
+=> RESULT (gap): DENIED (needs elevation) — exclusion lists (paths/processes/IPs/extensions) and ASR rule-specific exclusions are NOT viewable non-admin; residual risk that hidden admin-only exclusions exist cannot be excluded from this evidence.
+
+$ powershell.exe -NoProfile -Command '$t = Get-MpThreatDetection; if ($null -eq $t -or @($t).Count -eq 0) { Write-Output "No threat detections returned (empty)." } else { ... }'
+No threat detections returned (empty).
+
+$ powershell.exe -NoProfile -Command '$th = Get-MpThreat; ...'
+No threats currently remediated/threat history entries returned (empty).
+=> RESULT: VERIFIED
+=> CONCLUSION: Defender threat-detection history is empty for this account-visible scope — no active or previously remediated threats reported.
+
+SECTION 5 — Windows Firewall
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command 'netsh advfirewall show allprofiles state'
+Domain Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+
+Private Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+
+Public Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Ok.
+
+$ powershell.exe -NoProfile -Command 'netsh advfirewall show allprofiles firewallpolicy'
+Domain Profile Settings:
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Private Profile Settings:
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Public Profile Settings:
+----------------------------------------------------------------------
+Firewall Policy                       BlockInbound,AllowOutbound
+Ok.
+=> RESULT: VERIFIED
+=> CONCLUSION: All three profiles ON with default policy BlockInbound,AllowOutbound.
+
+$ powershell.exe -NoProfile -Command 'Get-NetFirewallRule -DisplayName "Node.js JavaScript Runtime" | Format-List DisplayName,Direction,Action,Enabled,Profile,LocalPort,RemoteIP,Program'
+DisplayName : Node.js JavaScript Runtime
+Direction   : Inbound
+Action      : Allow
+Enabled     : True
+Profile     : Public
+
+DisplayName : Node.js JavaScript Runtime
+Direction   : Inbound
+Action      : Allow
+Enabled     : True
+Profile     : Public
+(LocalPort/RemoteIP/Program are filter-side properties and do not bind via this
+ Format-List; expanded with the filter cmdlets below, read-only.)
+
+$ powershell.exe -NoProfile -Command 'Get-NetFirewallRule -DisplayName "Node.js JavaScript Runtime" | Get-NetFirewallApplicationFilter | Select-Object -Expand Program'
+C:\program files\nodejs\node.exe
+C:\program files\nodejs\node.exe
+
+$ powershell.exe -NoProfile -Command 'Get-NetFirewallRule -DisplayName "Node.js JavaScript Runtime" | Get-NetFirewallPortFilter | Format-List LocalPort,RemotePort,Protocol'
+LocalPort  : Any
+RemotePort : Any
+Protocol   : TCP
+
+LocalPort  : Any
+RemotePort : Any
+Protocol   : UDP
+=> RESULT: VERIFIED
+=> CONCLUSION: TWO enabled inbound ALLOW rules named "Node.js JavaScript Runtime" for C:\program files\nodejs\node.exe, applying to the PUBLIC profile, with LocalPort = Any (one TCP, one UDP). This permits any listening Node.js process inbound on all ports on public networks — a standing exposure. RemoteIP scope could not be bound in the captured output; not claimed.
+
+SECTION 6 — Account privileges / elevation state
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command 'whoami /groups'   [Git Bash shadowed this with coreutils whoami; re-ran as below]
+$ powershell.exe -NoProfile -Command '& "$env:SystemRoot\System32\whoami.exe" /groups'
+GROUP INFORMATION
+Group Name                                                    Type             SID          Attributes
+Everyone                                                      Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\Local account and member of Administrators group Well-known group S-1-5-114    Group used for deny only
+BUILTIN\Administrators                                        Alias            S-1-5-32-544 Group used for deny only
+BUILTIN\Users                                                 Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\INTERACTIVE                                      Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group
+CONSOLE LOGON                                                 Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\Authenticated Users                              Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\This Organization                                Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\Local account                                    Well-known group S-1-5-113    Mandatory group, Enabled by default, Enabled group
+LOCAL                                                         Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group
+NT AUTHORITY\NTLM Authentication                              Well-known group S-1-5-64-10   Mandatory group, Enabled by default, Enabled group
+Mandatory Label\Medium Mandatory Level                        Label            S-1-16-8192
+
+$ powershell.exe -NoProfile -Command '& "$env:SystemRoot\System32\whoami.exe" /priv'
+PRIVILEGES INFORMATION
+----------------------
+Privilege Name                Description                          State
+============================= ==================================== ========
+SeShutdownPrivilege           Shut down the system                 Disabled
+SeChangeNotifyPrivilege       Bypass traverse checking             Enabled
+SeUndockPrivilege             Remove computer from docking station Disabled
+SeIncreaseWorkingSetPrivilege Increase a process working set       Disabled
+SeTimeZonePrivilege           Change the time zone                 Disabled
+(no SeDebugPrivilege, no SeTcbPrivilege, no SeBackupPrivilege, no SeRestorePrivilege, no SeSecurityPrivilege entries present)
+
+$ powershell.exe -NoProfile -Command '$env:USERNAME; $env:USERDOMAIN'
+<windows-user>
+<host-name>
+=> RESULT: VERIFIED
+=> CONCLUSION: Current process is NOT elevated: BUILTIN\Administrators present as "Group used for deny only", integrity level Medium (S-1-16-8192), and the token holds no SeDebug/SeTcb/SeBackup/SeRestore/SeSecurity privileges. The account is a member of local Administrators (see Section 7) but runs filtered.
+
+SECTION 7 — Additional host facts and remaining UNVERIFIED items
+--------------------------------------------------------------------------------
+$ powershell.exe -NoProfile -Command '& "$env:SystemRoot\System32\net.exe" localgroup Administrators'
+Alias name     Administrators
+Comment        Administrators have complete and unrestricted access to the computer/domain
+
+Members
+-------------------------------------------------------------------------------
+Administrator
+<windows-user>
+The command completed successfully.
+=> RESULT: VERIFIED
+=> CONCLUSION: <windows-user> IS a member of the local Administrators group (built-in Administrator account also present/enabled-listed). Elevation is therefore achievable by the operator via UAC, but NOT from this non-elevated session.
+
+$ powershell.exe -NoProfile -Command 'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, Uptime | Format-List'
+Caption     : Microsoft Windows 11 Home Single Language
+Version     : 10.0.26300
+BuildNumber : 26300
+=> RESULT: VERIFIED
+=> CONCLUSION: Windows 11 Home Single Language, build 26300. (Home SKU has no BitLocker Group Policy/Device Encryption management surface; verify BitLocker as admin.)
+
+$ powershell.exe -NoProfile -Command 'Get-Service -Name WinDefend, MpsSvc, BDESVC, KeyIso, vmms -ErrorAction Continue | Format-Table Name,Status,StartType -AutoSize'
+Get-Service : Cannot find any service with service name 'vmms'.
+(Exit code 1 for vmms only)
+
+Name       Status StartType
+----       ------ ---------
+BDESVC    Running    Manual
+KeyIso    Running    Manual
+MpsSvc    Running Automatic
+WinDefend Running Automatic
+=> RESULT: VERIFIED
+=> CONCLUSION: WinDefend (Defender) and MpsSvc (Firewall) running (Automatic); BDESVC (BitLocker Drive Encryption service) and KeyIso (CNG Key Isolation, TPM-linked) are RUNNING on Manual start. Running KeyIso/BDESVC is consistent with, but does not prove, TPM ownership or volume encryption.
+
+STILL UNVERIFIED FOR LACK OF ELEVATION (must be re-run in an elevated session):
+1. BitLocker actual per-volume protection status/encryption state/used space (manage-bde -status denied; Section 1).
+   - Operator must run elevated `manage-bde -status` (NOT -protectors -get: recovery keys are out of scope by project rule).
+2. TPM presence, readiness, ownership, enablement (Get-Tpm / MicrosoftTpm WMI denied; Section 2).
+3. Defender exclusion lists and ASR rule-specific exclusions (admin-only; Section 4).
+4. Secure Boot certificate variables (db/dbx/PK/KEK) beyond the on/off flag (Confirm-SecureBootUEFI denied; only registry flag captured).
+5. Any tampering that requires admin visibility (hidden scheduled tasks, other users' firewall rules full scope, audit policy).
+================================================================================
+END OF RAW DUMP — all content above is verbatim command output or explicit errors.
+No credentials, keys, or BitLocker recovery values were queried or recorded.
+================================================================================

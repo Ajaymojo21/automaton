@@ -1,0 +1,235 @@
+{
+  "_comment": "Canonical Conway inference provider set (A13). Deployed copy: <stateDir>/inference-providers.json, read by ProviderRegistry.fromConfig from src/agent/loop.ts. A config file REPLACES DEFAULT_PROVIDERS rather than merging it (src/inference/provider-registry.ts:283-286), so every provider Conway should be able to use is restated here in full. Invalid JSON is swallowed and the built-in defaults are used instead (src/inference/provider-registry.ts:300-302) - keep this file parseable.",
+  "_credential": "No key material lives in this file. FreeLLMAPI's /v1 surface authenticates with its unified API key (freellmapi server/src/lib/inference-auth.ts:13-20 returns 401 authentication_error without it); the registry reads it from process.env.FREELLMAPI_API_KEY at call time (src/inference/provider-registry.ts:446-450). With that variable unset the registry sends the documented placeholder 'missing-freellmapi_api_key', which FreeLLMAPI rejects. FreeLLMAPI's own /api/tags and /api/chat (Ollama wire) are separate, keyless surfaces and are NOT used by this provider record.",
+  "_modelIds": "Model id 'auto' is FreeLLMAPI's virtual router model - the gateway picks the best currently available route (freellmapi server/src/routes/proxy.ts:47,475). Pinned upstream ids churn as free providers come and go, so they are deliberately not used here. contextWindow is a declared ceiling, not a guarantee: the real ceiling depends on which upstream the router lands on, and FreeLLMAPI publishes its own figure as context_window/context_length on GET /v1/models.",
+  "providers": [
+    {
+      "id": "freellmapi",
+      "name": "FreeLLMAPI (local gateway)",
+      "baseUrl": "http://localhost:3001/v1",
+      "apiKeyEnvVar": "FREELLMAPI_API_KEY",
+      "models": [
+        {
+          "id": "auto",
+          "tier": "reasoning",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0,
+          "costPerOutputToken": 0,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "auto",
+          "tier": "fast",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0,
+          "costPerOutputToken": 0,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "auto",
+          "tier": "cheap",
+          "contextWindow": 131072,
+          "maxOutputTokens": 4096,
+          "costPerInputToken": 0,
+          "costPerOutputToken": 0,
+          "supportsTools": false,
+          "supportsVision": false,
+          "supportsStreaming": true
+        }
+      ],
+      "maxRequestsPerMinute": 120,
+      "maxTokensPerMinute": 200000,
+      "priority": 5,
+      "enabled": true
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKeyEnvVar": "OPENAI_API_KEY",
+      "models": [
+        {
+          "id": "gpt-4.1",
+          "tier": "reasoning",
+          "contextWindow": 128000,
+          "maxOutputTokens": 32768,
+          "costPerInputToken": 2.0,
+          "costPerOutputToken": 8.0,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "gpt-4.1-mini",
+          "tier": "fast",
+          "contextWindow": 128000,
+          "maxOutputTokens": 16384,
+          "costPerInputToken": 0.4,
+          "costPerOutputToken": 1.6,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "gpt-4.1-nano",
+          "tier": "cheap",
+          "contextWindow": 128000,
+          "maxOutputTokens": 16384,
+          "costPerInputToken": 0.1,
+          "costPerOutputToken": 0.4,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        }
+      ],
+      "maxRequestsPerMinute": 500,
+      "maxTokensPerMinute": 2000000,
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnvVar": "GROQ_API_KEY",
+      "models": [
+        {
+          "id": "llama-3.3-70b-versatile",
+          "tier": "reasoning",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0.2,
+          "costPerOutputToken": 0.2,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "llama-3.3-70b-versatile",
+          "tier": "fast",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0.2,
+          "costPerOutputToken": 0.2,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "llama-3.1-8b-instant",
+          "tier": "cheap",
+          "contextWindow": 131072,
+          "maxOutputTokens": 4096,
+          "costPerInputToken": 0.05,
+          "costPerOutputToken": 0.08,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        }
+      ],
+      "maxRequestsPerMinute": 14400,
+      "maxTokensPerMinute": 500000,
+      "priority": 2,
+      "enabled": true
+    },
+    {
+      "id": "together",
+      "name": "Together AI",
+      "baseUrl": "https://api.together.xyz/v1",
+      "apiKeyEnvVar": "TOGETHER_API_KEY",
+      "models": [
+        {
+          "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+          "tier": "reasoning",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0.25,
+          "costPerOutputToken": 0.5,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+          "tier": "fast",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0.25,
+          "costPerOutputToken": 0.5,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+          "tier": "cheap",
+          "contextWindow": 131072,
+          "maxOutputTokens": 4096,
+          "costPerInputToken": 0.08,
+          "costPerOutputToken": 0.1,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        }
+      ],
+      "maxRequestsPerMinute": 600,
+      "maxTokensPerMinute": 1000000,
+      "priority": 3,
+      "enabled": false
+    },
+    {
+      "id": "local",
+      "name": "Local (Ollama/vLLM)",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKeyEnvVar": "LOCAL_API_KEY",
+      "models": [
+        {
+          "id": "llama3.3:70b",
+          "tier": "fast",
+          "contextWindow": 131072,
+          "maxOutputTokens": 8192,
+          "costPerInputToken": 0,
+          "costPerOutputToken": 0,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        },
+        {
+          "id": "llama3.1:8b",
+          "tier": "cheap",
+          "contextWindow": 131072,
+          "maxOutputTokens": 4096,
+          "costPerInputToken": 0,
+          "costPerOutputToken": 0,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsStreaming": true
+        }
+      ],
+      "maxRequestsPerMinute": 100,
+      "maxTokensPerMinute": 200000,
+      "priority": 10,
+      "enabled": false
+    }
+  ],
+  "tierDefaults": {
+    "reasoning": {
+      "preferredProvider": "freellmapi",
+      "fallbackOrder": ["openai", "groq", "together", "local"]
+    },
+    "fast": {
+      "preferredProvider": "freellmapi",
+      "fallbackOrder": ["groq", "openai", "together", "local"]
+    },
+    "cheap": {
+      "preferredProvider": "freellmapi",
+      "fallbackOrder": ["groq", "together", "local", "openai"]
+    }
+  }
+}

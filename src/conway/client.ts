@@ -9,6 +9,7 @@
 import { execSync } from "child_process";
 import fs from "fs";
 import nodePath from "path";
+import { scrubEnvironment } from "../security/sandbox.js";
 import type {
   ConwayClient,
   ExecResult,
@@ -28,6 +29,8 @@ import { keccak256, toHex } from "viem";
 import type { Address, PrivateKeyAccount } from "viem";
 import { randomUUID } from "crypto";
 import type { ChainType, ChainIdentity } from "../identity/chain.js";
+import { resolveHome } from "../runtime/home-guard.js";
+import { validateEndpointUrl } from "../security/url-guard.js";
 
 interface ConwayClientOptions {
   apiUrl: string;
@@ -37,6 +40,11 @@ interface ConwayClientOptions {
 
 export function createConwayClient(options: ConwayClientOptions): ConwayClient {
   const { apiUrl, apiKey } = options;
+  // B-9: validate the endpoint before any network call.
+  const check = validateEndpointUrl(apiUrl, "conway_api");
+  if (!check.ok) {
+    throw new Error(`Conway API URL rejected by URL guard: ${check.reason}`);
+  }
   // Normalize sandbox ID defensively so values like whitespace/"undefined"/"null"
   // never produce malformed API paths such as /v1/sandboxes//exec.
   const sandboxId = normalizeSandboxId(options.sandboxId);
@@ -114,7 +122,9 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
         timeout: timeout || 30_000,
         encoding: "utf-8",
         maxBuffer: 10 * 1024 * 1024,
-        cwd: process.env.HOME || "/root",
+        cwd: resolveHome(),
+        // Child processes never inherit activation tokens, API keys or secrets
+        env: scrubEnvironment(process.env).env,
       });
       return { stdout: stdout || "", stderr: "", exitCode: 0 };
     } catch (err: any) {
@@ -165,7 +175,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
 
   const resolveLocalPath = (filePath: string): string =>
     filePath.startsWith("~")
-      ? nodePath.join(process.env.HOME || "/root", filePath.slice(1))
+      ? nodePath.join(resolveHome(), filePath.slice(1))
       : filePath;
 
   const writeFile = async (

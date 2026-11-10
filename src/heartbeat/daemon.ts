@@ -26,6 +26,7 @@ import { DurableScheduler } from "./scheduler.js";
 import { upsertHeartbeatSchedule } from "../state/database.js";
 import type BetterSqlite3 from "better-sqlite3";
 import { createLogger } from "../observability/logger.js";
+import { isEmergencyStopActive } from "../security/emergency-stop.js";
 
 const logger = createLogger("heartbeat");
 
@@ -117,7 +118,11 @@ export function createHeartbeatDaemon(
     if (!running) return;
     timeoutId = setTimeout(async () => {
       try {
-        await scheduler.tick();
+        if (isEmergencyStopActive(rawDb)) {
+          logger.error("Emergency stop engaged — heartbeat tick skipped");
+        } else {
+          await scheduler.tick();
+        }
       } catch (err: any) {
         logger.error("Tick failed", err instanceof Error ? err : undefined);
       }
@@ -131,10 +136,14 @@ export function createHeartbeatDaemon(
     if (running) return;
     running = true;
 
-    // Run first tick immediately
-    scheduler.tick().catch((err) => {
-      logger.error("First tick failed", err instanceof Error ? err : undefined);
-    });
+    // Run first tick immediately, unless an emergency stop is engaged
+    if (isEmergencyStopActive(rawDb)) {
+      logger.error("Emergency stop engaged — daemon started without executing tasks");
+    } else {
+      scheduler.tick().catch((err) => {
+        logger.error("First tick failed", err instanceof Error ? err : undefined);
+      });
+    }
 
     // Schedule subsequent ticks
     scheduleTick();

@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import path from "path";
+import os from "os";
 import { isProtectedFile } from "../self-mod/code.js";
 import { createPathProtectionRules } from "../agent/policy-rules/path-protection.js";
 import type { PolicyRequest, AutomatonTool, ToolContext } from "../types.js";
@@ -113,6 +114,24 @@ describe("isProtectedFile", () => {
     expect(isProtectedFile("/home/user/.gnupg/keys")).toBe(true);
     expect(isProtectedFile("/etc/systemd/system/something.service")).toBe(true);
     expect(isProtectedFile("/proc/self/environ")).toBe(true);
+  });
+
+  it("blocks the protected locations of the platform under test", () => {
+    // The absolute pattern list is POSIX-shaped, so on Windows the protection has
+    // to come from the shared sandbox list — otherwise every system and credential
+    // path on the real platform would be writable by the self-mod engine.
+    const home = os.homedir();
+    if (process.platform === "win32") {
+      const winDir = process.env.SystemRoot || "C:\\Windows";
+      expect(isProtectedFile(path.join(winDir, "System32", "drivers", "etc", "hosts"))).toBe(true);
+      expect(isProtectedFile(path.join(home, ".ssh", "id_ed25519"))).toBe(true);
+      expect(isProtectedFile(path.join(home, "Documents", "notes.md"))).toBe(true);
+      expect(isProtectedFile(path.join(home, "AppData", "Local", "Google", "Chrome", "User Data", "Default", "Login Data"))).toBe(true);
+      expect(isProtectedFile(path.join(home, ".qoder", "settings.json"))).toBe(true);
+    } else {
+      expect(isProtectedFile("/etc/sudoers")).toBe(true);
+      expect(isProtectedFile(path.join(home, ".ssh", "id_ed25519"))).toBe(true);
+    }
   });
 });
 

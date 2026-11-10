@@ -22,10 +22,12 @@ import type {
   AutomatonDatabase,
   AutomatonIdentity,
   AutomatonConfig,
+  SecurityConfig,
   SocialClientInterface,
   InboxMessage,
 } from "../types.js";
-import { DEFAULT_CONFIG } from "../types.js";
+import { DEFAULT_CONFIG, DEFAULT_SECURITY_CONFIG } from "../types.js";
+import type { ToolCapability } from "../types.js";
 import path from "path";
 import os from "os";
 import fs from "fs";
@@ -335,10 +337,34 @@ export function createTestIdentity(): AutomatonIdentity {
   };
 }
 
+/**
+ * Test fixtures explicitly declare a permissive tool posture so existing
+ * execution tests keep exercising tool bodies. Production defaults remain
+ * deny-by-default; tests that assert denial override `security`.
+ */
+const TEST_ALL_CAPABILITIES: ToolCapability[] = [
+  "read_only",
+  "filesystem_read",
+  "filesystem_write",
+  "shell_execution",
+  "network_access",
+  "external_api",
+  "financial",
+  "wallet_signing",
+  "agent_spawning",
+  "publishing",
+  "administrative",
+];
+
+/**
+ * `security` is merged onto the test defaults, so callers may pass a partial —
+ * the same way the runtime config loader does.
+ */
 export function createTestConfig(
-  overrides?: Partial<AutomatonConfig>,
+  overrides?: Omit<Partial<AutomatonConfig>, "security"> & { security?: Partial<SecurityConfig> },
 ): AutomatonConfig {
-  return {
+  const { security: securityOverrides, ...configOverrides } = overrides ?? {};
+  const base: AutomatonConfig = {
     name: "test-automaton",
     genesisPrompt: "You are a test automaton.",
     creatorAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
@@ -357,6 +383,16 @@ export function createTestConfig(
     maxChildren: 3,
     maxTurnsPerCycle: 25,
     socialRelayUrl: "https://social.conway.tech",
-    ...overrides,
+    ...configOverrides,
+  };
+
+  return {
+    ...base,
+    security: {
+      ...DEFAULT_SECURITY_CONFIG,
+      lockdown: false,
+      allowedCapabilities: TEST_ALL_CAPABILITIES,
+      ...(securityOverrides ?? {}),
+    },
   };
 }

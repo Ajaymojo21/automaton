@@ -8,6 +8,7 @@ import { getEncoding, type Tiktoken } from "js-tiktoken";
 import type { ChatMessage } from "../types.js";
 
 const MAX_TOKEN_CACHE_SIZE = 10_000;
+const TOKEN_ESTIMATION_WINDOW = 2_048;
 const DEFAULT_RESERVE_TOKENS = 4_096;
 const COMPRESSION_HEADROOM_RATIO = 0.1;
 const MAX_EVENT_CONTENT_CHARS = 220;
@@ -149,16 +150,29 @@ export function createTokenCounter(): TokenCounter {
       return cached;
     }
 
-    let count: number;
+    // js-tiktoken's merge loop is superlinear on long, repetitive text (measured on
+    // a single run character: 1k 67ms, 2k 220ms, 4k 970ms; 50k did not return inside
+    // 60s) and the context budget path encodes every turn on every dispatch, so a
+    // large tool result stalled the agent loop. Encode a bounded window and scale the
+    // ratio. Real prose is cheap either way (100k mixed characters: 0.8ms); the window
+    // only caps the pathological case.
+    const windowed = normalizedText.length > TOKEN_ESTIMATION_WINDOW;
+    const sample = windowed ? normalizedText.slice(0, TOKEN_ESTIMATION_WINDOW) : normalizedText;
+
+    let sampleCount: number;
     if (encoder) {
       try {
-        count = encoder.encode(normalizedText).length;
+        sampleCount = encoder.encode(sample).length;
       } catch {
-        count = Math.ceil(normalizedText.length / 3.5);
+        sampleCount = Math.ceil(sample.length / 3.5);
       }
     } else {
-      count = Math.ceil(normalizedText.length / 3.5);
+      sampleCount = Math.ceil(sample.length / 3.5);
     }
+
+    const count = windowed
+      ? Math.max(1, Math.ceil((sampleCount / sample.length) * normalizedText.length))
+      : sampleCount;
 
     cache.set(key, count);
     enforceLruLimit(cache);

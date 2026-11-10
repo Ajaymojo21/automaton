@@ -292,8 +292,13 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
       maxRetries: 0,
     });
 
+    // The workspace defaults to os.homedir(), which on Windows follows USERPROFILE
+    // and ignores HOME — without overriding both the run writes plan artifacts into
+    // the real user profile instead of the temp home the assertions read.
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHome;
+    if (process.platform === "win32") process.env.USERPROFILE = tempHome;
     try {
       const pool = new LocalWorkerPool({
         db,
@@ -307,7 +312,10 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
 
       await (pool as any).runWorker("worker-test", task, new AbortController().signal);
     } finally {
-      process.env.HOME = originalHome;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
     }
 
     const row = getTaskById(db, task.id);

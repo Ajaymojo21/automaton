@@ -17,6 +17,7 @@ import { DEFAULT_DISCOVERY_CONFIG } from "../types.js";
 import { queryAgent, getTotalAgents, getRegisteredAgentsByEvents } from "./erc8004.js";
 import { keccak256, toBytes } from "viem";
 import { createLogger } from "../observability/logger.js";
+import { checkOutboundUrl, assertHostResolvesSafely } from "../security/url-guard.js";
 const logger = createLogger("registry.discovery");
 
 type Network = "mainnet" | "testnet";
@@ -54,6 +55,7 @@ export function isAllowedUri(uri: string): boolean {
   try {
     const url = new URL(uri);
     if (!['https:', 'ipfs:'].includes(url.protocol)) return false;
+    if (url.username !== '' || url.password !== '') return false;
     if (url.protocol === 'https:' && isInternalNetwork(url.hostname)) return false;
     return true;
   } catch {
@@ -323,6 +325,21 @@ export async function fetchAgentCard(
       fetchUrl = `${cfg.ipfsGateway}/ipfs/${uri.slice(7)}`;
     }
 
+    // B-9: validate the final URL (which may have been rewritten to the IPFS gateway)
+    // immediately before the request, and refuse redirect-based SSRF.
+    // A rewritten IPFS URL targets the operator's configured gateway, which may legitimately
+    // be a local node; a plain card URI may not.
+    const guarded = checkOutboundUrl(fetchUrl, { allowHttpOnLoopback: fetchUrl !== uri });
+    if (!guarded.ok) {
+      logger.error(`Blocked outbound agent-card fetch (${guarded.reason})`);
+      return null;
+    }
+    const dns = await assertHostResolvesSafely(guarded.url.hostname.replace(/^\[|\]$/g, ""), guarded.url.protocol);
+    if (!dns.ok) {
+      logger.error(`Blocked outbound agent-card fetch (${dns.reason})`);
+      return null;
+    }
+
     // Per-fetch timeout
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.fetchTimeoutMs);
@@ -330,6 +347,7 @@ export async function fetchAgentCard(
     try {
       const response = await fetch(fetchUrl, {
         signal: controller.signal,
+        redirect: "error",
       });
 
       if (!response.ok) return null;

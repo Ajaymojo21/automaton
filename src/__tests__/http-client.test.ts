@@ -522,6 +522,24 @@ describe("ResilientHttpClient", () => {
       expect(callCount).toBe(1); // No retries
     });
 
+    it("retries: 0 sends a retryable HTTP status exactly once (B-5, paid requests)", async () => {
+      const client = new ResilientHttpClient({
+        maxRetries: 3,
+        backoffBase: 1,
+        backoffMax: 10,
+      });
+
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve(new Response("upstream failed", { status: 500 }));
+      });
+
+      const response = await client.request("https://api.example.com/test", { retries: 0 });
+      expect(response.status).toBe(500);
+      expect(callCount).toBe(1);
+    });
+
     it("allows per-request timeout override", async () => {
       const client = new ResilientHttpClient({
         baseTimeout: 30_000,

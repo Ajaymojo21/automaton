@@ -228,7 +228,7 @@ describe("write_file / edit_own_file protection parity", () => {
     );
     // Relative paths resolve against /root, so "project/file.txt" -> "/root/project/file.txt"
     expect(result).toContain("File written");
-    expect(result).toContain("/root/project/file.txt");
+    expect(result.replace(/\\/g, "/")).toContain("/root/project/file.txt");
   });
 
   it("write_file allows tilde paths within sandbox home", async () => {
@@ -238,7 +238,7 @@ describe("write_file / edit_own_file protection parity", () => {
       ctx,
     );
     expect(result).toContain("File written");
-    expect(result).toContain("/root/.automaton/skills/test/SKILL.md");
+    expect(result.replace(/\\/g, "/")).toContain("/root/.automaton/skills/test/SKILL.md");
   });
 });
 
@@ -303,10 +303,10 @@ describe("read_file sensitive file blocking", () => {
     expect(result).toContain("Blocked");
   });
 
-  it("allows reading safe files", async () => {
+  it("allows reading safe files inside the sandbox root", async () => {
     const readTool = tools.find((t) => t.name === "read_file")!;
-    conway.files["/home/automaton/README.md"] = "# Hello";
-    const result = await readTool.execute({ path: "/home/automaton/README.md" }, ctx);
+    conway.files["/root/README.md"] = "# Hello";
+    const result = await readTool.execute({ path: "/root/README.md" }, ctx);
     expect(result).not.toContain("Blocked");
   });
 });
@@ -341,11 +341,11 @@ describe("read_file fallback shell escaping", () => {
     // Make readFile throw so the fallback exec(cat) path is triggered
     vi.spyOn(conway, "readFile").mockRejectedValue(new Error("API broken"));
 
-    await readTool.execute({ path: "/home/user/my file.txt" }, ctx);
+    await readTool.execute({ path: "my file.txt" }, ctx);
 
     expect(conway.execCalls.length).toBe(1);
-    // The path should be wrapped in single quotes by escapeShellArg
-    expect(conway.execCalls[0].command).toBe("cat '/home/user/my file.txt'");
+    // The confined path is still wrapped in single quotes by escapeShellArg
+    expect(conway.execCalls[0].command).toMatch(/^cat '.*my file\.txt'$/);
   });
 
   it("prevents command injection via semicolons in fallback path", async () => {
@@ -356,7 +356,9 @@ describe("read_file fallback shell escaping", () => {
 
     expect(conway.execCalls.length).toBe(1);
     // Semicolons inside single quotes are treated as literal characters
-    expect(conway.execCalls[0].command).toBe("cat 'foo; cat /etc/passwd'");
+    expect(conway.execCalls[0].command).toMatch(
+      /^cat '[^']*foo; cat [\\/]etc[\\/]passwd'$/,
+    );
   });
 
   it("escapes single quotes in file path in fallback", async () => {
@@ -367,7 +369,7 @@ describe("read_file fallback shell escaping", () => {
 
     expect(conway.execCalls.length).toBe(1);
     // Single quotes are escaped using the '\'' technique
-    expect(conway.execCalls[0].command).toBe("cat 'it'\\''s a file.txt'");
+    expect(conway.execCalls[0].command).toContain("it'\\''s a file.txt");
   });
 
   it("prevents subshell injection via $() in fallback path", async () => {
@@ -378,7 +380,7 @@ describe("read_file fallback shell escaping", () => {
 
     expect(conway.execCalls.length).toBe(1);
     // $() inside single quotes is treated as literal text
-    expect(conway.execCalls[0].command).toBe("cat '$(whoami).txt'");
+    expect(conway.execCalls[0].command).toMatch(/^cat '[^']*\$\(whoami\)\.txt'$/);
   });
 });
 
