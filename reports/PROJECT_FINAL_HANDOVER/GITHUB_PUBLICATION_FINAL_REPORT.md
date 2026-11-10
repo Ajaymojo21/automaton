@@ -209,7 +209,7 @@ was introduced.
 | Check | Observation |
 |---|---|
 | `git remote -v` | `origin` fetch/push both `https://github.com/Conway-Research/automaton.git`; no credential embedded in the URL |
-| `git config user.name` / `user.email` | `Ajaymojo21` / `mylovemojo@gmail.com` |
+| `git config user.name` | `Ajaymojo21` (the account email is carried only by commit author metadata and is omitted here) |
 | `git ls-remote origin main` | `d8f816881fd24b6f5e3d616e59edec387a447667` — the remote did not move before or after the probe |
 | `git rev-list --count origin/main..main` | 1 |
 | Push permission probe | `GIT_TERMINAL_PROMPT=0 git push --dry-run origin main` |
